@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "couchctl"
+version = "0.1.0"
+description = "Control Samsung and Android TVs on your network, and send the remote's app buttons to the apps you want"
+readme = "README.md"
+requires-python = ">=3.9"
+license = "MIT"
+authors = [{ name = "Konstantinos Georgiou" }]
+dependencies = ["websockets>=13", "tomli>=2; python_version < '3.11'"]
+keywords = ["samsung", "tizen", "android-tv", "adb", "remote", "wake-on-lan", "home-automation"]
+classifiers = ["Programming Language :: Python :: 3", "Topic :: Home Automation"]
+
+[project.urls]
+Homepage = "https://github.com/drkostas/couchctl"
+
+[project.scripts]
+couchctl = "couchctl.cli:main"
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
