@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0
+
+- A Claude Code skill, installed with `couchctl skill`
+
 ## 0.1.0
 
 First release.
