@@ -5,7 +5,9 @@ import argparse
 import datetime
 import json
 import os
+import shutil
 import sys
+from pathlib import Path
 import urllib.request
 
 from . import __version__, androidtv, power, redirect, samsung
@@ -129,6 +131,17 @@ def cmd_watch(cfg, args) -> int:
     return 0
 
 
+SKILL_SRC = Path(__file__).parent / "skill" / "SKILL.md"
+
+
+def install_skill(target: str = "~/.claude/skills") -> Path:
+    """Copy the Claude Code skill that comes with couchctl into a skills folder."""
+    dest = Path(target).expanduser() / "couchctl"
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(SKILL_SRC, dest / "SKILL.md")
+    return dest / "SKILL.md"
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="couchctl", description="Control Samsung and Android TVs on your network.")
     p.add_argument("--config", default=None, help="config file (default $COUCHCTL_CONFIG or ~/.config/couchctl/config.toml)")
@@ -177,7 +190,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--report-token-env", help="name of an environment variable holding a bearer token for --report-url")
     s.set_defaults(fn=cmd_watch)
 
+    s = sub.add_parser("skill", help="install the Claude Code skill for couchctl (needs no config)")
+    s.add_argument("--dir", default="~/.claude/skills")
+    s.set_defaults(fn=None)
+
     args = p.parse_args(argv)
+    if args.cmd == "skill":
+        print(f"installed {install_skill(args.dir)}")
+        return 0
     path = args.config or default_path()
     try:
         cfg = load(path)

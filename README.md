@@ -74,6 +74,14 @@ The original app does appear for a second or two before it is replaced, and the 
 
 With `--report-url`, every redirect is also posted as JSON (device, from, to, name, outcome, message, time), with an optional bearer token read from the environment variable named by `--report-token-env`.
 
+## Claude Code skill
+
+```bash
+couchctl skill            # copies it to ~/.claude/skills/couchctl
+```
+
+The skill gives Claude the whole procedure for taking control of a household's screens with couchctl (finding the devices and their app ids, the settings each one needs, pairing, the redirects, running the watcher) and a table of the failures we met with how to check and fix each one.
+
 ## Limits
 
 - couchctl must be on the same network as the screens. From another network every device reads as off, so use `couchctl state --maybe-away` on a laptop that moves between networks.
