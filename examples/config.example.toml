@@ -1,0 +1,26 @@
+# couchctl config. Copy to ~/.config/couchctl/config.toml and change the addresses.
+
+# Where pairing tokens are kept (mode 600). This is the default.
+token_file = "~/.config/couchctl/tokens.json"
+
+[devices.living-room]
+kind = "samsung"
+host = "192.168.1.20"
+# Needed only for `couchctl on`. The set must have "Power on with mobile" enabled.
+mac = "aa:bb:cc:dd:ee:ff"
+
+# Each redirect sends one app button somewhere else. `from` is the app the button opens and `to`
+# is the app to open instead, both as Samsung app ids.
+[[devices.living-room.redirect]]
+from = "3201910019365"
+to = "3201606009684"
+name = "Prime Video button to Spotify"
+
+[devices.projector]
+kind = "androidtv"
+adb = "192.168.1.30:5555"
+
+[[devices.projector.redirect]]
+from = "com.netflix.ninja"
+to = "com.spotify.tv.android"
+name = "Netflix button to Spotify"

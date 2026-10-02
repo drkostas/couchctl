@@ -1,0 +1,15 @@
+# systemd unit for the button watcher, for example on a Raspberry Pi on the same network.
+# Copy to /etc/systemd/system/, then: systemctl daemon-reload && systemctl enable --now couchctl-watch
+[Unit]
+Description=couchctl button watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+ExecStart=/usr/local/bin/couchctl watch
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
