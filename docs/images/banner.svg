@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="400" viewBox="0 0 1600 400">
+<rect width="1600" height="400" fill="#0f1419"/>
+<rect x="64" y="96" width="48" height="6" rx="3" fill="#e0af68"/>
+<text x="64" y="182" font-family="'SF Mono','Menlo','JetBrains Mono','DejaVu Sans Mono',monospace" font-size="56" font-weight="600" fill="#e6edf3">couchctl</text>
+<text x="64" y="232" font-family="-apple-system,'Inter','Helvetica Neue','Segoe UI',Arial,sans-serif" font-size="24" fill="#8b98a5">Control Samsung and Android TVs on your network, and send the</text>
+<text x="64" y="264" font-family="-apple-system,'Inter','Helvetica Neue','Segoe UI',Arial,sans-serif" font-size="24" fill="#8b98a5">remote's app buttons where you want.</text>
+<g fill="none" stroke-linecap="round" stroke-linejoin="round" transform="translate(933.5 50.0) scale(1.190)"><g transform="translate(0.0 0.0)"><rect x="0" y="0" width="382" height="230" rx="10" stroke="#2b3743" stroke-width="3"/><line x1="141.0" y1="250" x2="241.0" y2="250" stroke="#2b3743" stroke-width="3"/><rect x="32" y="40" width="90" height="60" rx="6" stroke="#3a4754" stroke-width="2"/><rect x="146" y="40" width="90" height="60" rx="6" stroke="#3a4754" stroke-width="2"/><path d="M160 52 l62 36 M222 52 l-62 36" stroke="#3a4754" stroke-width="2"/><rect x="260" y="40" width="90" height="60" rx="6" stroke="#e0af68" stroke-width="3"/></g><g transform="translate(422.0 41.0)"><rect x="0" y="0" width="56" height="170" rx="20" stroke="#2b3743" stroke-width="3"/><circle cx="28" cy="40" r="10" stroke="#e0af68" stroke-width="3"/><line x1="18" y1="80" x2="38" y2="80" stroke="#3a4754" stroke-width="4"/><line x1="18" y1="100" x2="38" y2="100" stroke="#3a4754" stroke-width="4"/></g></g>
+</svg>

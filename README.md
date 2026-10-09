@@ -1,3 +1,5 @@
+![couchctl](docs/images/banner.png)
+
 # couchctl
 
 couchctl controls Samsung (Tizen) televisions and Android TV devices on your home network. It reads whether each screen is on, switches it on and off, opens apps, and sends the remote's app buttons to the apps you actually use.
