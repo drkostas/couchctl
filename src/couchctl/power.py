@@ -8,12 +8,13 @@ refused, not as failed.
 from __future__ import annotations
 
 import socket
+from collections.abc import Mapping
 
 from . import androidtv, samsung
 from .config import Device
 
 
-def state(dev: Device, on_their_network: bool = True) -> bool | None:
+def state(dev: Device, on_their_network: bool = True, *, env: Mapping[str, str] | None = None) -> bool | None:
     """True on, False off, None when nobody can tell.
 
     Pass on_their_network=False when this machine may not have a route to the device (a laptop on
@@ -22,7 +23,7 @@ def state(dev: Device, on_their_network: bool = True) -> bool | None:
     if not on_their_network:
         return None
     if dev.kind == "androidtv":
-        return androidtv.alive(dev)
+        return androidtv.alive(dev, env=env)
     host, port = dev.host, dev.api_port
     if samsung.reachable(host, port):
         return True
@@ -56,17 +57,17 @@ def power_on(dev: Device) -> tuple[str, str]:
     return "success", "wake packet sent (the set wakes if it listens for one)"
 
 
-def power_off(dev: Device, token_file) -> tuple[str, str]:
+def power_off(dev: Device, token_file, *, env: Mapping[str, str] | None = None) -> tuple[str, str]:
     """Switch off, after checking the device is on right now.
 
     The state is read again at the moment of acting, because on these sets a power key sent to a
     device that is already off can switch it on.
     """
-    if state(dev) is not True:
+    if state(dev, env=env) is not True:
         return "refused", f"{dev.name} is not answering, so it is already off"
     if dev.kind == "androidtv":
-        androidtv.connect(dev.adb)
-        ok, why = androidtv.power_key(dev)
+        androidtv.connect(dev.adb, env=env)
+        ok, why = androidtv.power_key(dev, env=env)
     else:
         ok, why = samsung.send_key(dev, token_file, "KEY_POWER")
     return ("success" if ok else "failure"), why

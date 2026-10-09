@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0
+
+- The adb functions (and `power.state`, `power_off`, `redirect.peek`, `launch`, `watch`, `watch_all`) take an optional `env` for the adb process. With it, `adb` is also looked up on that env's PATH
+
 ## 0.2.0
 
 - A Claude Code skill, installed with `couchctl skill`
