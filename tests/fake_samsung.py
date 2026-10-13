@@ -9,7 +9,7 @@ from websockets.asyncio.server import serve
 
 
 class FakeTV:
-    def __init__(self, token_auth=True, allow=True, issue_token="tok-123456"):
+    def __init__(self, token_auth=True, allow=True, issue_token="tok-123456", unanswered_after=None):
         self.apps = {"app.unwanted": {"running": False, "visible": False}, "app.wanted": {"running": False, "visible": False}}
         self.launched = []
         self.keys = []
@@ -17,6 +17,9 @@ class FakeTV:
         self.token_auth = token_auth
         self.allow = allow
         self.issue_token = issue_token
+        # seconds the "allow this device?" prompt stays up before the set says ms.channel.timeOut;
+        # None: somebody answers at once (allow decides how)
+        self.unanswered_after = unanswered_after
         tv = self
 
         class Api(BaseHTTPRequestHandler):
@@ -63,6 +66,10 @@ class FakeTV:
             token = (q.get("token") or [None])[0]
             tv.tokens_seen.append(token)
             if tv.token_auth and token != tv.issue_token:
+                if tv.unanswered_after is not None:
+                    await asyncio.sleep(tv.unanswered_after)
+                    await ws.send(json.dumps({"event": "ms.channel.timeOut"}))
+                    return
                 if not tv.allow:
                     await ws.send(json.dumps({"event": "ms.channel.unauthorized"}))
                     return

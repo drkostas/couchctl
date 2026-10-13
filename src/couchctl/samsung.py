@@ -81,8 +81,23 @@ def remote_url(dev: Device, token: str | None) -> str:
     return f"{url}&token={token}" if token else url
 
 
-async def _talk(dev: Device, token: str | None, payload: dict | None, timeout: float = 30.0):
-    """Connect, read the greeting, optionally send one command. Returns (greeting, new token)."""
+#: How long a set shows its "allow this device?" prompt before it gives up and sends
+#: ms.channel.timeOut. A client that waits only this long reads its own timeout instead of the
+#: set's answer, so every wait for a greeting is longer than this.
+PROMPT_SECONDS = 30.0
+
+
+def _unanswered(dev: Device) -> str:
+    return (f"the television asked on its screen whether to allow this remote, and nobody answered "
+            f"within {PROMPT_SECONDS:.0f} seconds. It no longer accepts the held token: run "
+            f"`couchctl pair {dev.name} --again` with someone at the set to allow it")
+
+
+async def _talk(dev: Device, token: str | None, payload: dict | None, timeout: float | None = None):
+    """Connect, read the greeting, and send one command only if the set opened the channel.
+    Returns (greeting, new token)."""
+    if timeout is None:
+        timeout = PROMPT_SECONDS + 10
     from websockets.asyncio.client import connect
 
     ctx = None
@@ -95,13 +110,14 @@ async def _talk(dev: Device, token: str | None, payload: dict | None, timeout: f
     async with connect(remote_url(dev, token), ssl=ctx, open_timeout=timeout, close_timeout=5, max_size=2**20) as ws:
         greeting = json.loads(await asyncio.wait_for(ws.recv(), timeout))
         fresh = (greeting.get("data") or {}).get("token")
-        if payload is not None:
+        # a key sent after any other greeting goes nowhere, and must not read as sent
+        if payload is not None and greeting.get("event") == "ms.channel.connect":
             await ws.send(json.dumps(payload))
             await asyncio.sleep(1.0)  # give the set a moment to act before the socket closes
         return greeting, fresh
 
 
-def pair(dev: Device, token_file, timeout: float = 40.0) -> tuple[str, str]:
+def pair(dev: Device, token_file, timeout: float = PROMPT_SECONDS + 10) -> tuple[str, str]:
     """Ask the set for a token. It shows a prompt, and somebody in the room has to allow it.
 
     Returns (outcome, message), where outcome is "success", "refused" or "failure".
@@ -114,6 +130,9 @@ def pair(dev: Device, token_file, timeout: float = 40.0) -> tuple[str, str]:
         return "failure", f"{type(e).__name__}: {str(e)[:140]}"
     if greeting.get("event") == "ms.channel.unauthorized":
         return "refused", "the prompt on the television was declined"
+    if greeting.get("event") == "ms.channel.timeOut":
+        return "refused", (f"nobody answered the prompt on the television within "
+                           f"{PROMPT_SECONDS:.0f} seconds")
     if not fresh:
         return "refused", "the television offered no token (the prompt was declined or timed out)"
     token_store.write(token_file, dev.name, fresh)
@@ -138,6 +157,10 @@ def send_key(dev: Device, token_file, key: str) -> tuple[bool, str]:
         return False, f"{type(e).__name__}: {str(e)[:140]}"
     if greeting.get("event") == "ms.channel.unauthorized":
         return False, f"the television refused the token: run `couchctl pair {dev.name} --again`"
+    if greeting.get("event") == "ms.channel.timeOut":
+        return False, _unanswered(dev)
+    if greeting.get("event") != "ms.channel.connect":
+        return False, f"the television did not open the remote channel ({greeting.get('event')!r})"
     if fresh and fresh != token:
         token_store.write(token_file, dev.name, fresh)
     return True, f"{key} sent"
@@ -151,7 +174,7 @@ def paired_and_accepted(dev: Device, token_file) -> bool | None:
     if not reachable(dev.host, dev.api_port):
         return None
     try:
-        greeting, _ = asyncio.run(_talk(dev, token, None, timeout=20))
+        greeting, _ = asyncio.run(_talk(dev, token, None))
     except Exception:  # noqa: BLE001
         return False
     return greeting.get("event") == "ms.channel.connect"
