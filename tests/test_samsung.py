@@ -51,6 +51,34 @@ def test_keys_need_pairing_first(tv, token_file):
     assert tv.tokens_seen[-1] == "tok-123456"
 
 
+def test_a_prompt_nobody_answers_is_named_and_no_key_is_sent(token_file, monkeypatch):
+    """A set that no longer accepts the held token asks on its screen and, after its prompt time,
+    says ms.channel.timeOut. The client must wait past that time to hear it, and must not report
+    the key as sent."""
+    monkeypatch.setattr(samsung, "PROMPT_SECONDS", 0.5)
+    t = FakeTV(unanswered_after=0.5)
+    try:
+        tokens.write(token_file, "tv", "a-token-the-set-forgot")
+        ok, why = samsung.send_key(t.device(), token_file, "KEY_POWER")
+        assert not ok and "nobody answered" in why and "--again" in why
+        assert t.keys == []
+        outcome, _ = power.power_off(t.device(), token_file)
+        assert outcome != "success" and t.keys == []
+    finally:
+        t.close()
+
+
+def test_pairing_that_nobody_answers_says_so(token_file, monkeypatch):
+    monkeypatch.setattr(samsung, "PROMPT_SECONDS", 0.5)
+    t = FakeTV(unanswered_after=0.5)
+    try:
+        outcome, why = samsung.pair(t.device(), token_file)
+        assert outcome == "refused" and "nobody answered" in why
+        assert tokens.read(token_file, "tv") is None
+    finally:
+        t.close()
+
+
 def test_power_off_sends_the_power_key_only_when_on(tv, token_file):
     samsung.pair(tv.device(), token_file)
     outcome, _ = power.power_off(tv.device(), token_file)
