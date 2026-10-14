@@ -7,8 +7,10 @@ refused, not as failed.
 """
 from __future__ import annotations
 
+import ipaddress
 import socket
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 
 from . import androidtv, samsung
 from .config import Device
@@ -47,14 +49,61 @@ def send_wol(mac: str, broadcast: str = "255.255.255.255") -> None:
             s.sendto(pkt, (broadcast, port))
 
 
-def power_on(dev: Device) -> tuple[str, str]:
+#: How long power_on keeps waking a device before it reports that the device did not come on. A set
+#: switched off a moment ago is still shutting down for several seconds and ignores a packet sent
+#: then, so one packet is not enough.
+WAKE_WAIT = 25.0
+#: How often the packet is sent again while waiting.
+WAKE_EVERY = 2.0
+
+
+def broadcasts(host: str | None) -> list[str]:
+    """Where a wake packet is sent: the local network's broadcast address, and also the device's own
+    /24 broadcast address when its host is an IPv4 address. Some systems send 255.255.255.255 out of
+    one network interface only, and the directed address reaches a device on another one."""
+    out = ["255.255.255.255"]
+    try:
+        ip = ipaddress.ip_address(host or "")
+    except ValueError:
+        return out
+    if ip.version == 4:
+        out.append(str(ipaddress.ip_network(f"{ip}/24", strict=False).broadcast_address))
+    return out
+
+
+def wake(dev: Device, *, wait: float = WAKE_WAIT, every: float = WAKE_EVERY,
+         env: Mapping[str, str] | None = None,
+         send: Callable[[str, str], None] = send_wol, is_on: Callable[[], bool] | None = None,
+         sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> tuple[str, str]:
+    """Wake a device over the network and check that it came on.
+
+    The wake packet is sent every `every` seconds until the device answers or `wait` seconds pass.
+    The outcome is "success" only when the device answers, "failure" when it never did, and
+    "refused" when the device has no MAC address to wake.
+    """
     if not dev.mac:
         return "refused", f"{dev.name} has no mac in the config, so it cannot be woken over the network"
-    try:
-        send_wol(dev.mac)
-    except (OSError, ValueError) as e:
-        return "failure", f"could not send the wake packet: {e}"
-    return "success", "wake packet sent (the set wakes if it listens for one)"
+    check = is_on or (lambda: state(dev, env=env) is True)
+    started, sent = clock(), 0
+    while True:
+        try:
+            for address in broadcasts(dev.host):
+                send(dev.mac, address)
+        except (OSError, ValueError) as e:
+            return "failure", f"could not send the wake packet: {e}"
+        sent += 1
+        sleep(every)
+        if check():
+            return "success", f"{dev.name} is on, after {clock() - started:.0f} s"
+        if clock() - started >= wait:
+            return "failure", (f"{dev.name} did not come on after {sent} wake packets over {wait:.0f} s. "
+                               "A set wakes from the network only when it listens for it (Power on with mobile "
+                               "on Samsung sets), and one switched off moments ago may still be shutting down.")
+
+
+def power_on(dev: Device, *, wait: float = WAKE_WAIT, env: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """Wake a device and report whether it came on (see wake)."""
+    return wake(dev, wait=wait, env=env)
 
 
 def power_off(dev: Device, token_file, *, env: Mapping[str, str] | None = None) -> tuple[str, str]:

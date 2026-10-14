@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `power_on` (and `couchctl on`) checks that the device came on. It sends the wake packet every 2 seconds, to the broadcast address and to the device's own /24 network, until the device answers or 25 seconds pass, and reports `failure` with the likely reasons when it never answered. Before, it reported `success` as soon as one packet left, whether or not the set woke, and a set switched off moments earlier, still shutting down, ignored that one packet
 - A Samsung set that no longer accepts the held token shows an "allow this device?" prompt and, after 30 seconds, says `ms.channel.timeOut`. couchctl waited exactly 30 seconds, so it reported its own `TimeoutError` instead. It now waits longer than the prompt, and `send_key`, `power_off` and `pair` say that nobody answered the prompt and how to pair again
 - `send_key` sends the key only when the set opened the remote channel (`ms.channel.connect`). Before, a key sent after any other greeting was reported as sent
 
