@@ -54,7 +54,7 @@ couchctl watch --dry-run          # log presses without launching anything
 
 The set answers HTTP on port 8001 without a password. That is enough to read its state, see which app is in front and open an app. Remote keys (power off, home, volume) use a websocket on port 8002, and newer sets ask for permission the first time. Run `couchctl pair <device>` while the set is on, and choose Allow on the television when it asks. couchctl keeps the token the set returns in `~/.config/couchctl/tokens.json` (readable only by you) and uses it from then on.
 
-`couchctl on` sends a wake-on-LAN packet to the `mac` in the config. The set only answers it when "Power on with mobile" is enabled (Settings, General, Network, Expert settings on most models).
+`couchctl on` sends a wake-on-LAN packet to the `mac` in the config every 2 seconds until the set answers, for up to 25 seconds, and says whether it came on. The set only answers it when "Power on with mobile" is enabled (Settings, General, Network, Expert settings on most models).
 
 A Samsung app id is the long number in the Samsung app store (3201606009684 is Spotify), or for a sideloaded app the id its package declares. To find the id behind a button, press the button and run `couchctl front <device> <id> <id> ...` with the ids you suspect, or read the list from the set with `sdb shell 0 vd_applist` if you have Tizen Studio.
 

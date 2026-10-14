@@ -52,7 +52,7 @@ Proof that this step worked is `couchctl state` printing `on` for every screen t
 
 ## Step 2, enable what each device needs
 
-Samsung, for power on. Enable "Power On with Mobile" (on most models under Settings, General, Network, Expert settings). Without it the set ignores wake packets, and `couchctl on` cannot tell, because a wake packet gets no reply.
+Samsung, for power on. Enable "Power On with Mobile" (on most models under Settings, General, Network, Expert settings). Without it the set ignores wake packets, and `couchctl on` reports `failure` after 25 seconds of trying, because the set never answers.
 
 Samsung, for sideloading only (not needed for couchctl itself). Open Apps, type 1 2 3 4 5 on the remote, set Developer mode to On and set Host PC IP to the address of the machine that runs `sdb`. Then unplug the set for about ten seconds. The power button only sends it to standby, and developer mode is applied only on a full power cycle. The developer port 26101 opens once it is active.
 
@@ -86,7 +86,7 @@ couchctl front projector           # the package in front
 couchctl front tv-a <id> <id>      # which of these Samsung ids is visible
 ```
 
-`couchctl off` reads the state again first and refuses when the screen is not answering, because on these devices a power key sent to a sleeping screen can wake it. `couchctl on` reports `success` when the packet left, which is not proof the screen woke. Check with `couchctl state tv-a` after 15 to 30 seconds.
+`couchctl off` reads the state again first and refuses when the screen is not answering, because on these devices a power key sent to a sleeping screen can wake it. `couchctl on` sends the packet every 2 seconds and reports `success` only once the screen answers, or `failure` after 25 seconds. A set switched off moments earlier is still shutting down for several seconds and ignores a packet sent then, which is why it keeps sending.
 
 On Android, `launch` uses `monkey` with the `LEANBACK_LAUNCHER` category, because TV apps register there and not under the phone launcher. "has no TV launcher activity" means the package has no TV entry point.
 
