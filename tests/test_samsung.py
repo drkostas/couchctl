@@ -98,6 +98,60 @@ def test_state(tv):
     assert power.state(tv.device(), on_their_network=False) is None
 
 
+@pytest.fixture
+def standby():
+    t = FakeTV(power_state="standby")
+    yield t
+    t.close()
+
+
+def test_a_set_in_standby_is_off_though_it_answers(standby):
+    assert power.state(standby.device()) is False
+
+
+def test_a_set_too_old_to_report_its_power_state_is_on_when_it_answers():
+    t = FakeTV(power_state=None)
+    try:
+        assert power.state(t.device()) is True
+    finally:
+        t.close()
+
+
+def test_a_set_that_answers_but_does_not_describe_itself_cannot_be_told(tmp_path):
+    import socket
+
+    from couchctl.config import Device
+
+    with socket.socket() as srv:                      # accepts a connection and never answers
+        srv.bind(("127.0.0.1", 0))
+        srv.listen(8)
+        dev = Device(name="mute", kind="samsung", host="127.0.0.1", api_port=srv.getsockname()[1])
+        assert power.state(dev) is None
+        outcome, why = power.power_off(dev, tmp_path / "t.json")
+        assert outcome == "refused" and "was not sent" in why
+
+
+def test_power_off_of_a_set_in_standby_sends_no_key(standby, token_file):
+    samsung.pair(standby.device(), token_file)
+    outcome, why = power.power_off(standby.device(), token_file)
+    assert outcome == "refused" and "already off" in why and standby.keys == []
+
+
+def test_wake_waits_until_a_set_in_standby_says_it_is_on(standby):
+    import dataclasses
+
+    sent = []
+
+    def send(mac, address):
+        sent.append(address)
+        if len(sent) == 4:                            # it comes on with the second packet
+            standby.power_state = "on"
+
+    dev = dataclasses.replace(standby.device(), mac="AA:BB:CC:DD:EE:FF")
+    outcome, why = power.wake(dev, send=send, sleep=lambda s: None)
+    assert outcome == "success" and len(sent) == 4, (outcome, why, sent)
+
+
 def test_foreground_and_launch(tv):
     dev = tv.device(redirects=[Redirect("app.unwanted", "app.wanted")])
     assert redirect.peek(dev) == (True, None)
