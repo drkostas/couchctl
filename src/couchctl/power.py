@@ -27,10 +27,16 @@ def state(dev: Device, on_their_network: bool = True, *, env: Mapping[str, str] 
     if dev.kind == "androidtv":
         return androidtv.alive(dev, env=env)
     host, port = dev.host, dev.api_port
-    if samsung.reachable(host, port):
-        return True
     # One refused connection is not a verdict, so ask again with a longer wait.
-    return samsung.reachable(host, port, timeout=3.0)
+    if not (samsung.reachable(host, port) or samsung.reachable(host, port, timeout=3.0)):
+        return False
+    # Answering is not the same as on. A Samsung set keeps its network up in standby and while it
+    # shuts down, and says which in PowerState. Read as on, a set in standby made a wake report
+    # success with the screen dark, and made power_off send the power key, which switched it on.
+    said = samsung.info(dev)
+    if not said:
+        return None                                   # it answers but does not describe itself
+    return said.get("PowerState", "on") == "on"       # a set too old to report it is on when it answers
 
 
 def wake_packet(mac: str) -> bytes:
@@ -77,9 +83,9 @@ def wake(dev: Device, *, wait: float = WAKE_WAIT, every: float = WAKE_EVERY,
          sleep: Callable[[float], None] = time.sleep, clock: Callable[[], float] = time.monotonic) -> tuple[str, str]:
     """Wake a device over the network and check that it came on.
 
-    The wake packet is sent every `every` seconds until the device answers or `wait` seconds pass.
-    The outcome is "success" only when the device answers, "failure" when it never did, and
-    "refused" when the device has no MAC address to wake.
+    The wake packet is sent every `every` seconds until the device is on or `wait` seconds pass.
+    The outcome is "success" only when the device is on (a Samsung set that answers in standby is
+    not), "failure" when it never came on, and "refused" when the device has no MAC address to wake.
     """
     if not dev.mac:
         return "refused", f"{dev.name} has no mac in the config, so it cannot be woken over the network"
@@ -110,10 +116,14 @@ def power_off(dev: Device, token_file, *, env: Mapping[str, str] | None = None) 
     """Switch off, after checking the device is on right now.
 
     The state is read again at the moment of acting, because on these sets a power key sent to a
-    device that is already off can switch it on.
+    device that is already off, or in standby, switches it on.
     """
-    if state(dev, env=env) is not True:
-        return "refused", f"{dev.name} is not answering, so it is already off"
+    now = state(dev, env=env)
+    if now is None:
+        return "refused", (f"{dev.name} answers but does not say whether it is on, so the power key, "
+                           "which switches it either way, was not sent")
+    if now is not True:
+        return "refused", f"{dev.name} is not on (not answering, or in standby), so it is already off"
     if dev.kind == "androidtv":
         androidtv.connect(dev.adb, env=env)
         ok, why = androidtv.power_key(dev, env=env)

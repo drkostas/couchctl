@@ -9,7 +9,8 @@ from websockets.asyncio.server import serve
 
 
 class FakeTV:
-    def __init__(self, token_auth=True, allow=True, issue_token="tok-123456", unanswered_after=None):
+    def __init__(self, token_auth=True, allow=True, issue_token="tok-123456", unanswered_after=None,
+                 power_state="on"):
         self.apps = {"app.unwanted": {"running": False, "visible": False}, "app.wanted": {"running": False, "visible": False}}
         self.launched = []
         self.keys = []
@@ -20,6 +21,8 @@ class FakeTV:
         # seconds the "allow this device?" prompt stays up before the set says ms.channel.timeOut;
         # None: somebody answers at once (allow decides how)
         self.unanswered_after = unanswered_after
+        # what /api/v2/ reports as PowerState: "on", "standby", or None for a set too old to say
+        self.power_state = power_state
         tv = self
 
         class Api(BaseHTTPRequestHandler):
@@ -33,8 +36,11 @@ class FakeTV:
 
             def do_GET(self):
                 if self.path == "/api/v2/":
-                    return self._send(200, {"device": {"name": "Fake TV", "wifiMac": "AA:BB:CC:DD:EE:FF",
-                                                       "TokenAuthSupport": "true" if tv.token_auth else "false"}})
+                    device = {"name": "Fake TV", "wifiMac": "AA:BB:CC:DD:EE:FF",
+                              "TokenAuthSupport": "true" if tv.token_auth else "false"}
+                    if tv.power_state is not None:
+                        device["PowerState"] = tv.power_state
+                    return self._send(200, {"device": device})
                 app = self.path.rsplit("/", 1)[-1]
                 if app in tv.apps:
                     return self._send(200, dict(tv.apps[app], id=app))
