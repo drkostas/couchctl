@@ -48,6 +48,8 @@ couchctl key living-room KEY_HOME
 couchctl front living-room        # which redirected app is on screen
 couchctl watch                    # redirect the app buttons until stopped
 couchctl watch --dry-run          # log presses without launching anything
+couchctl sideload living-room app.wgt --sign myprofile   # install or update a sideloaded app
+couchctl sideload projector app.apk --package com.example.player
 ```
 
 ## Samsung televisions
@@ -57,6 +59,15 @@ The set answers HTTP on port 8001 without a password. That is enough to read its
 `couchctl on` sends a wake-on-LAN packet to the `mac` in the config every 2 seconds until the set answers, for up to 25 seconds, and says whether it came on. The set only answers it when "Power on with mobile" is enabled (Settings, General, Network, Expert settings on most models).
 
 A Samsung app id is the long number in the Samsung app store (3201606009684 is Spotify), or for a sideloaded app the id its package declares. To find the id behind a button, press the button and run `couchctl front <device> <id> <id> ...` with the ids you suspect, or read the list from the set with `sdb shell 0 vd_applist` if you have Tizen Studio.
+
+## Sideloaded apps
+
+`couchctl sideload <device> <file>` installs or updates an app that does not come from the device's own store, and then checks the result against what the device reports. It never takes the installer's own "completed" or "Success" as proof.
+
+- On a Samsung set the file is a `.wgt`. The set needs developer mode with this machine as its Host PC IP, and the package must be signed for the set (see the skill). `--sign <profile>` signs a package from its author again with your Tizen Studio profile first. Afterwards the set must list the app at the package's version. The sdb server that the install starts listens on every network interface, so it is stopped at the end; `--keep-server` leaves it running. A set that has just woken can take ten minutes or more before it starts the install, while it updates its own apps.
+- On an Android TV the file is an `.apk`, and `--package` names it. The installed file must match the `.apk` byte for byte.
+
+`sdb` and `tizen` come from Tizen Studio (`tools/sdb` and `tools/ide/bin/tizen`); set `COUCHCTL_SDB` and `COUCHCTL_TIZEN` when they are not on the PATH. From Python, `couchctl.sideload` also offers `latest_release` and `download` for an app published as GitHub release assets, and `newer` to compare versions.
 
 ## Android TV
 
