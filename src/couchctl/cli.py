@@ -7,10 +7,11 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 from pathlib import Path
 import urllib.request
 
-from . import __version__, androidtv, power, redirect, samsung
+from . import __version__, androidtv, power, redirect, samsung, sideload
 from . import tokens as token_store
 from .config import Config, default_path, load
 
@@ -91,6 +92,25 @@ def cmd_front(cfg, args) -> int:
         reached, app = samsung.foreground(dev, candidates)
     print(app if app else ("none of the listed apps" if reached else "unreachable"))
     return 0 if reached else 1
+
+
+def cmd_sideload(cfg, args) -> int:
+    dev = cfg.device(args.device)
+    try:
+        if dev.kind == "androidtv":
+            if not args.package:
+                print("an androidtv install needs --package (the app's package name)", file=sys.stderr)
+                return 2
+            done = sideload.android_install(dev, args.file, args.package)
+        else:
+            with tempfile.TemporaryDirectory() as work:
+                wgt = sideload.resign(args.file, args.sign, work) if args.sign else args.file
+                done = sideload.samsung_install(dev, wgt, keep_server=args.keep_server)
+    except sideload.SideloadError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print(("installed: " if done.ok else "not installed: ") + done.detail)
+    return 0 if done.ok else 1
 
 
 def _reporter(url: str | None, token_env: str | None):
@@ -181,6 +201,14 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("device")
     s.add_argument("apps", nargs="*", help="samsung: app ids to check (default: the redirect sources)")
     s.set_defaults(fn=cmd_front)
+
+    s = sub.add_parser("sideload", help="install or update an app from a .wgt (samsung) or an .apk (androidtv), and check it")
+    s.add_argument("device")
+    s.add_argument("file")
+    s.add_argument("--sign", metavar="PROFILE", help="samsung: sign the package again with this Tizen Studio profile first")
+    s.add_argument("--package", help="androidtv: the app's package name, to check the installed file")
+    s.add_argument("--keep-server", action="store_true", help="samsung: leave the sdb server running afterwards")
+    s.set_defaults(fn=cmd_sideload)
 
     s = sub.add_parser("watch", help="redirect the remotes' app buttons, until stopped")
     s.add_argument("devices", nargs="*")

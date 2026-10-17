@@ -144,7 +144,7 @@ To prove the deployed watcher works, wake a screen, open a redirected app with `
 
 DNS blocking (Pi-hole and similar) blocks banner and tracker domains, but YouTube serves its ads from its own domains, so DNS cannot remove them. The fix is a different YouTube client, chosen per platform.
 
-- Android TV or Google TV takes SmartTube, or TizenTube Cobalt (the TizenTube author's Android TV port). Install with `adb install`, using the build that matches `ro.product.cpu.abi`.
+- Android TV or Google TV takes SmartTube, or TizenTube Cobalt (the TizenTube author's Android TV port). Install with `couchctl sideload <device> <file>.apk --package <package>` (or `adb install -r`), using the build that matches `ro.product.cpu.abi`.
 - Samsung Tizen cannot run Android apps. It takes TizenTube, delivered through TizenBrew, as a signed `.wgt` package sideloaded over `sdb`.
 
 Then redirect the remote's YouTube button to the new client with couchctl, so the household never opens the stock app by habit.
@@ -158,8 +158,9 @@ A Samsung set installs only packages signed with a distributor certificate that 
 3. Connect all the sets before you create the distributor certificate. The device list is filled from whatever `sdb` sees at that moment, and a set missing from it refuses every package.
 4. To add a set later, create a new profile, choose "Select an existing author certificate" at the author step (this avoids a second key and the confusion of two authors), then create a new distributor certificate with every set connected. The edit icon on an existing distributor card only changes which file the profile uses. It does not ask Samsung for a new certificate.
 5. Never use the certificates shipped inside `tizen-studio/tools/certificate-generator/`. They look valid in the dialog and every set refuses them.
-6. Install with `sdb -s <address>:26101 push <file>.wgt /home/owner/share/tmp/sdk_tools/tmp/app.wgt`, then `sdb -s <address>:26101 shell 0 vd_appinstall <app id> /home/owner/share/tmp/sdk_tools/tmp/app.wgt`. Start it with `shell 0 was_execute <app id>`.
+6. Install with `couchctl sideload <device> <file>.wgt --sign <profile>`. It signs the author's package again with your profile, copies it to the set, runs `vd_appinstall`, and succeeds only when `vd_applist` shows the app at the package's version. By hand it is `sdb -s <address>:26101 push <file>.wgt /home/owner/share/tmp/sdk_tools/tmp/app.wgt`, then `sdb -s <address>:26101 shell 0 vd_appinstall <app id> /home/owner/share/tmp/sdk_tools/tmp/app.wgt`. Start it with `shell 0 was_execute <app id>`. A set that has just woken can answer "Work is queuing" for ten minutes or more before the install starts.
 7. Prove it with `sdb shell 0 vd_applist` showing the new ids, and the app appearing on screen after `couchctl launch`.
+8. Stop the sdb server when you are done (`sdb kill-server`; `couchctl sideload` does it by itself). It listens on every network interface, so anyone on the network can reach it while it runs.
 
 Routes that fail and cost hours, so skip them. A package signed by its author, the SDK's public or partner certificates, the USB demo package route (its certificate has expired and the service that issued it is closed), and desktop installers that reimplement sdb (they fail against sets that report `secure_protocol:enabled`).
 
