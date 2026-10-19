@@ -69,6 +69,16 @@ A Samsung app id is the long number in the Samsung app store (3201606009684 is S
 
 `sdb` and `tizen` come from Tizen Studio (`tools/sdb` and `tools/ide/bin/tizen`); set `COUCHCTL_SDB` and `COUCHCTL_TIZEN` when they are not on the PATH. From Python, `couchctl.sideload` also offers `latest_release` and `download` for an app published as GitHub release assets, and `newer` to compare versions.
 
+### When the set trusts another address
+
+Developer mode accepts sdb only from the one Host PC IP entered on the set. If this machine still
+holds that address on some interface but reaches the network from another, relay through it:
+
+```bash
+couchctl relay --from 192.0.2.243 192.0.2.40:26101    # listens on 127.0.0.1:26102 until stopped
+sdb connect 127.0.0.1:26102
+```
+
 ## Android TV
 
 Turn on network debugging in the device's developer options and allow the adb prompt on screen once. Apps are named by their package (`com.spotify.tv.android`), and `couchctl front` prints whatever package is in front. A device in standby usually stops answering adb, so couchctl reconnects by itself when it comes back.
