@@ -218,11 +218,31 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--report-token-env", help="name of an environment variable holding a bearer token for --report-url")
     s.set_defaults(fn=cmd_watch)
 
+    s = sub.add_parser("relay", help="relay sdb from 127.0.0.1 to a set, connecting from the address it trusts (needs no config)")
+    s.add_argument("target", help="the set's sdb address, HOST:PORT (port 26101)")
+    s.add_argument("--from", dest="source", required=True, help="the address the set trusts as its Host PC IP")
+    s.add_argument("--listen", type=int, default=26102, help="the loopback port to listen on")
+    s.set_defaults(fn=None)
+
     s = sub.add_parser("skill", help="install the Claude Code skill for couchctl (needs no config)")
     s.add_argument("--dir", default="~/.claude/skills")
     s.set_defaults(fn=None)
 
     args = p.parse_args(argv)
+    if args.cmd == "relay":
+        from . import relay   # noqa: PLC0415
+        host, _, port = args.target.rpartition(":")
+        if not host or not port.isdigit():
+            print("relay: the target is HOST:PORT", file=sys.stderr)
+            return 2
+        try:
+            relay.serve(args.source, args.listen, host, int(port), say=lambda s: print(s, flush=True))
+        except OSError as e:
+            print(f"relay: {e}", file=sys.stderr)
+            return 1
+        except KeyboardInterrupt:
+            return 130
+        return 0
     if args.cmd == "skill":
         print(f"installed {install_skill(args.dir)}")
         return 0
