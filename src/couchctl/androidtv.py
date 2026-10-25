@@ -81,3 +81,44 @@ def launch(dev: Device, package: str, timeout: float = 10.0, *, env: Mapping[str
 def power_key(dev: Device, *, env: Mapping[str, str] | None = None) -> tuple[bool, str]:
     out = shell(dev.adb, "input keyevent KEYCODE_POWER", env=env)
     return (True, "power key sent") if out is not None else (False, "the device did not answer adb")
+
+
+#: characters that need no escaping: letters, digits, and punctuation the device shell and `input`
+#: both pass through untouched. Everything else is backslash-escaped, and a space becomes `%s`.
+_SAFE = "_-+./@,:"
+
+
+def _escape_for_input(text: str) -> str:
+    """Make `text` safe as the single argument to `input text` over `adb shell`.
+
+    Two layers read it. The device's own shell parses the command first, so every character it
+    treats specially (quotes, spaces, `;`, `&`, `|`, `$`, `(`, and the rest) is backslash-escaped
+    to reach `input` as itself. Then `input text` turns `%s` back into a space, which is why a
+    space is sent as `%s` rather than as a literal the shell would split on. The one sequence this
+    cannot carry is a literal `%s` a caller types: `input` always reads it as a space.
+    """
+    out = []
+    for ch in text:
+        if ch == " ":
+            out.append("%s")
+        elif ch == "%" or ch.isalnum() or ch in _SAFE:
+            out.append(ch)           # `%` is left alone; `input` only treats `%s` specially
+        else:
+            out.append("\\" + ch)
+    return "".join(out)
+
+
+def send_text(dev: Device, text: str, *, submit: bool = False,
+              env: Mapping[str, str] | None = None) -> tuple[bool, str]:
+    """Type `text` into the focused field over adb, and press Enter when `submit` is set.
+
+    The field has to be focused already (a search box, a login field); `input text` types wherever
+    the cursor is and reports nothing about where that was, so a caller that must know the text
+    landed has to look at the screen. `submit` sends KEYCODE_ENTER, which a search field reads as
+    "search".
+    """
+    if text and shell(dev.adb, f"input text {_escape_for_input(text)}", env=env) is None:
+        return False, "the device did not answer adb"
+    if submit and shell(dev.adb, "input keyevent KEYCODE_ENTER", env=env) is None:
+        return False, "the text was typed but ENTER did not reach the device"
+    return True, "text sent and submitted" if submit else "text sent"

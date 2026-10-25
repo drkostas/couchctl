@@ -77,6 +77,16 @@ def cmd_key(cfg, args) -> int:
     return 0 if ok else 1
 
 
+def cmd_text(cfg, args) -> int:
+    dev = cfg.device(args.device)
+    if dev.kind == "androidtv":
+        ok, why = androidtv.send_text(dev, args.text, submit=args.enter)
+    else:
+        ok, why = samsung.send_text(dev, cfg.token_file, args.text, submit=args.enter)
+    print(why)
+    return 0 if ok else 1
+
+
 def cmd_launch(cfg, args) -> int:
     ok, why = redirect.launch(cfg.device(args.device), args.app)
     print(why)
@@ -191,6 +201,12 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("device")
     s.add_argument("key")
     s.set_defaults(fn=cmd_key)
+
+    s = sub.add_parser("text", help="type text into the field the screen has open (a search box, a login field)")
+    s.add_argument("device")
+    s.add_argument("text")
+    s.add_argument("--enter", action="store_true", help="press Enter after, to submit")
+    s.set_defaults(fn=cmd_text)
 
     s = sub.add_parser("launch", help="open an app by its id (samsung) or package (androidtv)")
     s.add_argument("device")
