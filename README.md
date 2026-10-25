@@ -45,6 +45,7 @@ couchctl off living-room
 couchctl on living-room           # wake-on-LAN
 couchctl launch living-room 3201606009684
 couchctl key living-room KEY_HOME
+couchctl text living-room "jazz radio" --enter   # type into the open field, then submit
 couchctl front living-room        # which redirected app is on screen
 couchctl watch                    # redirect the app buttons until stopped
 couchctl watch --dry-run          # log presses without launching anything

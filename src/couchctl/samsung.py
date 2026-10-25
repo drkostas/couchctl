@@ -93,9 +93,9 @@ def _unanswered(dev: Device) -> str:
             f"`couchctl pair {dev.name} --again` with someone at the set to allow it")
 
 
-async def _talk(dev: Device, token: str | None, payload: dict | None, timeout: float | None = None):
-    """Connect, read the greeting, and send one command only if the set opened the channel.
-    Returns (greeting, new token)."""
+async def _talk(dev: Device, token: str | None, payloads: list[dict] | None = None, timeout: float | None = None):
+    """Connect, read the greeting, and send each command in `payloads`, one after another, only if
+    the set opened the channel. Returns (greeting, new token)."""
     if timeout is None:
         timeout = PROMPT_SECONDS + 10
     from websockets.asyncio.client import connect
@@ -110,9 +110,12 @@ async def _talk(dev: Device, token: str | None, payload: dict | None, timeout: f
     async with connect(remote_url(dev, token), ssl=ctx, open_timeout=timeout, close_timeout=5, max_size=2**20) as ws:
         greeting = json.loads(await asyncio.wait_for(ws.recv(), timeout))
         fresh = (greeting.get("data") or {}).get("token")
-        # a key sent after any other greeting goes nowhere, and must not read as sent
-        if payload is not None and greeting.get("event") == "ms.channel.connect":
-            await ws.send(json.dumps(payload))
+        # a command sent after any other greeting goes nowhere, and must not read as sent
+        if payloads and greeting.get("event") == "ms.channel.connect":
+            for i, payload in enumerate(payloads):
+                if i:
+                    await asyncio.sleep(0.2)  # let the set take each one before the next
+                await ws.send(json.dumps(payload))
             await asyncio.sleep(1.0)  # give the set a moment to act before the socket closes
         return greeting, fresh
 
@@ -139,20 +142,21 @@ def pair(dev: Device, token_file, timeout: float = PROMPT_SECONDS + 10) -> tuple
     return "success", "paired"
 
 
-def send_key(dev: Device, token_file, key: str) -> tuple[bool, str]:
-    """Press one remote key (KEY_POWER, KEY_HOME, KEY_VOLUP and so on)."""
+def _send(dev: Device, token_file, payloads: list[dict], done: str) -> tuple[bool, str]:
+    """Open the remote channel with the held token and send each message on it.
+
+    The token and greeting handling every remote command needs lives here once: the set must be
+    answering, token-auth sets must be paired, and a command counts as sent only when the set
+    opened the channel (`ms.channel.connect`), not after a refusal or a timed-out prompt.
+    """
     said = info(dev)
     if not said:
         return False, "the set is not answering, so there is nothing to talk to"
     token = token_store.read(token_file, dev.name)
     if said.get("TokenAuthSupport") == "true" and not token:
         return False, f"not paired: run `couchctl pair {dev.name}` once and allow the prompt on the television"
-    payload = {
-        "method": "ms.remote.control",
-        "params": {"Cmd": "Click", "DataOfCmd": key, "Option": "false", "TypeOfRemote": "SendRemoteKey"},
-    }
     try:
-        greeting, fresh = asyncio.run(_talk(dev, token, payload))
+        greeting, fresh = asyncio.run(_talk(dev, token, payloads))
     except Exception as e:  # noqa: BLE001
         return False, f"{type(e).__name__}: {str(e)[:140]}"
     if greeting.get("event") == "ms.channel.unauthorized":
@@ -163,7 +167,35 @@ def send_key(dev: Device, token_file, key: str) -> tuple[bool, str]:
         return False, f"the television did not open the remote channel ({greeting.get('event')!r})"
     if fresh and fresh != token:
         token_store.write(token_file, dev.name, fresh)
-    return True, f"{key} sent"
+    return True, done
+
+
+def send_key(dev: Device, token_file, key: str) -> tuple[bool, str]:
+    """Press one remote key (KEY_POWER, KEY_HOME, KEY_VOLUP and so on)."""
+    payload = {
+        "method": "ms.remote.control",
+        "params": {"Cmd": "Click", "DataOfCmd": key, "Option": "false", "TypeOfRemote": "SendRemoteKey"},
+    }
+    return _send(dev, token_file, [payload], f"{key} sent")
+
+
+def send_text(dev: Device, token_file, text: str, *, submit: bool = False) -> tuple[bool, str]:
+    """Type `text` into whatever text field the set has open, over the remote channel.
+
+    The characters go as one `SendInputString` message (the text base64-encoded in `Cmd`), and
+    `submit` adds a `SendInputEnd` after it, which on most fields acts like pressing Done on the
+    on-screen keyboard. The set accepts this only while that keyboard is up (a search box, a login
+    field); with no field open the characters go nowhere and the set reports no error either way,
+    so a caller that must know the text arrived has to look at the screen.
+    """
+    payloads = [{
+        "method": "ms.remote.control",
+        "params": {"Cmd": base64.b64encode(text.encode()).decode(), "DataOfCmd": "base64",
+                   "TypeOfRemote": "SendInputString"},
+    }]
+    if submit:
+        payloads.append({"method": "ms.remote.control", "params": {"TypeOfRemote": "SendInputEnd"}})
+    return _send(dev, token_file, payloads, "text sent and submitted" if submit else "text sent")
 
 
 def paired_and_accepted(dev: Device, token_file) -> bool | None:

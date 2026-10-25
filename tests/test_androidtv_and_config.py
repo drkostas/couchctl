@@ -9,13 +9,15 @@ from couchctl.cli import main
 from couchctl.config import Device, Redirect, parse
 
 FAKE_ADB = """#!/bin/sh
-# A fake adb. It logs every call and answers from $FAKE_ADB_FRONT.
-echo "$@" >> "$FAKE_ADB_LOG"
+# A fake adb. It logs every call and answers from $FAKE_ADB_FRONT. printf, not echo, so a
+# backslash in the command (text input escapes several) is logged exactly as it arrived.
+printf '%s\\n' "$*" >> "$FAKE_ADB_LOG"
 case "$*" in
   *"echo ok"*) [ -n "$FAKE_ADB_DOWN" ] && exit 1; echo ok ;;
   *mResumedActivity*) [ -n "$FAKE_ADB_DOWN" ] && exit 1
      echo "  mResumedActivity: ActivityRecord{1 u0 $FAKE_ADB_FRONT/.Main t1}" ;;
   *monkey*) echo "Events injected: 1" ;;
+  *input*) [ -n "$FAKE_ADB_DOWN" ] && exit 1 ;;
 esac
 exit 0
 """
@@ -62,6 +64,33 @@ def test_launch_uses_the_tv_launcher_category(adb):
     assert "monkey -p com.wanted -c android.intent.category.LEANBACK_LAUNCHER 1" in adb.read_text()
 
 
+def test_escape_for_input_spaces_and_shell_specials():
+    assert androidtv._escape_for_input("a b & c(1)") == r"a%sb%s\&%sc\(1\)"
+    assert androidtv._escape_for_input("plain.text_1@2:3") == "plain.text_1@2:3"
+    assert androidtv._escape_for_input("100%") == "100%"   # a lone % is passed through for `input`
+
+
+def test_send_text_escapes_and_submit_presses_enter(adb):
+    ok, why = androidtv.send_text(box, "a b & c(1)", submit=True)
+    assert ok and why == "text sent and submitted"
+    log = adb.read_text()
+    assert r"input text a%sb%s\&%sc\(1\)" in log   # spaces as %s, shell specials backslash-escaped
+    assert "input keyevent KEYCODE_ENTER" in log
+
+
+def test_send_text_without_submit_sends_no_enter(adb):
+    ok, why = androidtv.send_text(box, "hi there")
+    assert ok and why == "text sent"
+    log = adb.read_text()
+    assert "input text hi%sthere" in log and "KEYCODE_ENTER" not in log
+
+
+def test_send_text_to_a_device_that_does_not_answer_fails(adb, monkeypatch):
+    monkeypatch.setenv("FAKE_ADB_DOWN", "1")
+    ok, why = androidtv.send_text(box, "hi")
+    assert not ok and "did not answer" in why
+
+
 def test_config_parses_and_defaults_the_adb_port():
     cfg = parse({"devices": {
         "tv": {"kind": "samsung", "host": "10.0.0.2", "redirect": [{"from": "1", "to": "2", "name": "a to b"}]},
@@ -100,3 +129,16 @@ def test_cli_state_with_a_config(tmp_path, capsys):
     assert main(["--config", str(conf), "state", "--maybe-away"]) == 0
     assert "unknown" in capsys.readouterr().out
     assert main(["--config", str(conf), "off", "nope"]) == 2
+
+
+def test_cli_text_on_an_androidtv_device(tmp_path, adb, capsys):
+    conf = tmp_path / "c.toml"
+    conf.write_text(textwrap.dedent("""
+        [devices.box]
+        kind = "androidtv"
+        adb = "10.0.0.9:5555"
+    """))
+    assert main(["--config", str(conf), "text", "box", "find me", "--enter"]) == 0
+    assert capsys.readouterr().out.strip() == "text sent and submitted"
+    log = adb.read_text()
+    assert "input text find%sme" in log and "input keyevent KEYCODE_ENTER" in log

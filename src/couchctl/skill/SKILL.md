@@ -84,7 +84,11 @@ couchctl launch tv-a 3201606009684
 couchctl launch projector com.spotify.tv.android
 couchctl front projector           # the package in front
 couchctl front tv-a <id> <id>      # which of these Samsung ids is visible
+couchctl text tv-a "jazz radio"    # type into the open text field
+couchctl text tv-a "jazz radio" --enter   # type, then submit
 ```
+
+`couchctl text` types into whatever text field the screen has open, which saves pecking at an on-screen keyboard with the remote. Open the field first (a search box, a login field), then send the words; `--enter` submits. The screen reports nothing about what reached it, so look at it to confirm. A Samsung set takes the text over the remote websocket and so needs pairing, exactly as a key does, and only while its keyboard is up; an Android TV takes it over adb, where `input text` sends spaces as `%s` and escapes the shell's special characters for you.
 
 `couchctl off` reads the state again first and refuses when the screen is not answering, because on these devices a power key sent to a sleeping screen can wake it. `couchctl on` sends the packet every 2 seconds and reports `success` only once the screen answers, or `failure` after 25 seconds. A set switched off moments earlier is still shutting down for several seconds and ignores a packet sent then, which is why it keeps sending.
 

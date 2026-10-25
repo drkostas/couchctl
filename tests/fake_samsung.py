@@ -1,5 +1,6 @@
 """A fake Samsung television: the HTTP API on one port and the remote channel (plain ws) on another."""
 import asyncio
+import base64
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -14,6 +15,8 @@ class FakeTV:
         self.apps = {"app.unwanted": {"running": False, "visible": False}, "app.wanted": {"running": False, "visible": False}}
         self.launched = []
         self.keys = []
+        self.typed = []           # each SendInputString, decoded from base64
+        self.input_ended = 0      # how many SendInputEnd messages arrived
         self.tokens_seen = []
         self.token_auth = token_auth
         self.allow = allow
@@ -83,8 +86,14 @@ class FakeTV:
             else:
                 await ws.send(json.dumps({"event": "ms.channel.connect", "data": {}}))
             async for msg in ws:
-                d = json.loads(msg)
-                tv.keys.append(d["params"]["DataOfCmd"])
+                p = json.loads(msg).get("params", {})
+                kind = p.get("TypeOfRemote")
+                if kind == "SendInputString":
+                    tv.typed.append(base64.b64decode(p["Cmd"]).decode())
+                elif kind == "SendInputEnd":
+                    tv.input_ended += 1
+                else:
+                    tv.keys.append(p["DataOfCmd"])
 
         async def start():
             self.ws = await serve(handler, "127.0.0.1", 0)

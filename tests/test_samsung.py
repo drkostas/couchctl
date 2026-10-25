@@ -51,6 +51,19 @@ def test_keys_need_pairing_first(tv, token_file):
     assert tv.tokens_seen[-1] == "tok-123456"
 
 
+def test_send_text_types_the_string_and_submit_ends_the_input(tv, token_file):
+    ok, why = samsung.send_text(tv.device(), token_file, "hello world")
+    assert not ok and "not paired" in why       # a text field needs the same pairing a key does
+    samsung.pair(tv.device(), token_file)
+    ok, why = samsung.send_text(tv.device(), token_file, "hello world")
+    assert ok and why == "text sent"
+    assert tv.typed == ["hello world"] and tv.input_ended == 0   # the string, no Done without submit
+    ok, why = samsung.send_text(tv.device(), token_file, "搜索 & more", submit=True)
+    assert ok and why == "text sent and submitted"
+    assert tv.typed == ["hello world", "搜索 & more"]   # base64 carries any unicode unharmed
+    assert tv.input_ended == 1                          # submit adds exactly one SendInputEnd
+
+
 def test_a_prompt_nobody_answers_is_named_and_no_key_is_sent(token_file, monkeypatch):
     """A set that no longer accepts the held token asks on its screen and, after its prompt time,
     says ms.channel.timeOut. The client must wait past that time to hear it, and must not report
