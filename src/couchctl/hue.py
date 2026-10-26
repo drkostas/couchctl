@@ -179,6 +179,35 @@ def config(host: str, timeout: float = 6.0, transport: Transport | None = None, 
     return said if isinstance(said, dict) and said.get("bridgeid") else {}
 
 
+def reach(host: str, timeout: float = 6.0, transport: Transport | None = None, *,
+          insecure: bool = False) -> dict:
+    """Probe a bridge and say WHY if it is not usable, which `config()` cannot (it returns {} for
+    every failure alike). A caller that must record the difference uses this:
+
+      {"ok": True, "config": {...}}                        it answered as a bridge
+      {"ok": False, "reason": "untrusted", "why": "..."}   it answered, but its certificate is not a
+                                                           trusted Hue certificate (a man in the middle,
+                                                           or an old self-signed bridge that needs insecure=True)
+      {"ok": False, "reason": "unreachable", "why": "..."} nothing answered as a bridge (off, or no route)
+
+    `config()` is left exactly as it is, so its callers and their tests are untouched; this stands
+    beside it only to tell a certificate failure apart from an unreachable bridge."""
+    try:
+        status, raw = _transport_for(transport, insecure)("GET", f"https://{host}/api/0/config", None, {}, timeout)
+    except OSError as e:
+        why = getattr(e, "reason", e)
+        if isinstance(why, ssl.SSLCertVerificationError):
+            return {"ok": False, "reason": "untrusted",
+                    "why": f"the bridge at {host} did not present a trusted Hue certificate "
+                           f"({getattr(why, 'verify_message', None) or why})"}
+        return {"ok": False, "reason": "unreachable",
+                "why": f"the bridge at {host} did not answer ({type(e).__name__})"}
+    said = _json(raw) if status == 200 else None
+    if isinstance(said, dict) and said.get("bridgeid"):
+        return {"ok": True, "config": said}
+    return {"ok": False, "reason": "unreachable", "why": f"nothing answered as a bridge at {host} (HTTP {status})"}
+
+
 def pair(host: str, app: str = "couchctl#device", *, wait: float = PAIR_WAIT, every: float = 2.0,
          transport: Transport | None = None, insecure: bool = False,
          sleep=time.sleep, clock=time.monotonic) -> dict:
