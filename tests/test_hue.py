@@ -221,3 +221,32 @@ def test_the_transport_is_chosen_by_url_and_the_insecure_opt_in():
     assert hue._transport_for(None, True) is hue._https_insecure
     mine = lambda *a: (200, b"[]")
     assert hue._transport_for(mine, True) is mine                                      # a caller's own transport wins
+
+
+def test_reach_tells_untrusted_apart_from_unreachable_while_config_stays_empty():
+    import ssl
+
+    def cert_fail(*a):
+        raise ssl.SSLCertVerificationError("certificate verify failed: unable to get local issuer certificate")
+
+    def refused(*a):
+        raise ConnectionRefusedError("connection refused")
+
+    good = lambda *a: (200, b'{"bridgeid": "001788fffe000000", "modelid": "BSB002"}')  # noqa: E731
+
+    # a certificate failure is named, never hidden as "offline"
+    untrusted = hue.reach("192.0.2.40", transport=cert_fail)
+    assert untrusted["ok"] is False and untrusted["reason"] == "untrusted"
+    assert "certificate" in untrusted["why"]
+
+    # an unreachable bridge is its own reason
+    down = hue.reach("192.0.2.40", transport=refused)
+    assert down["ok"] is False and down["reason"] == "unreachable"
+
+    # a bridge that answers comes back ok with its config
+    ok = hue.reach("192.0.2.40", transport=good)
+    assert ok["ok"] is True and ok["config"]["bridgeid"] == "001788fffe000000"
+
+    # config() keeps its contract: {} for BOTH failures, so its callers and their tests are untouched
+    assert hue.config("192.0.2.40", transport=cert_fail) == {}
+    assert hue.config("192.0.2.40", transport=refused) == {}
