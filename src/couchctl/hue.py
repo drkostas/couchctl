@@ -22,9 +22,12 @@ What comes back is a plain summary of the bridge's own resources:
 
 The key is a secret: whoever holds it can switch every light. Keep it where you keep passwords.
 
-The bridge's certificate is signed by the vendor's own authority, not by one the system trusts,
-so the connection is encrypted but the certificate is not checked. That is how local Hue clients
-usually connect. Use this only on a network you trust.
+The discovery service is reached over fully verified HTTPS. A bridge's own certificate is signed
+by one of the vendor's Hue root CAs, with the bridge id as its name rather than the address, so the
+connection to a bridge is verified against those roots (its name is not checked, since we dial an
+address and the certificate names the bridge id, and a certificate signed by a Hue root is proof of
+a genuine bridge). An old bridge that serves a self-signed certificate needs `insecure=True`, which
+turns the check off and sends the key to whatever answers, so use it only on a network you trust.
 """
 from __future__ import annotations
 
@@ -32,6 +35,7 @@ import json
 import ssl
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable
 
@@ -48,16 +52,94 @@ LINK_BUTTON_NOT_PRESSED = 101
 Transport = Callable[[str, str, "bytes | None", dict, float], "tuple[int, bytes]"]
 
 
-def _https(method: str, url: str, body: bytes | None, headers: dict, timeout: float) -> tuple[int, bytes]:
+#: the vendor's own root certificate authorities, which sign every genuine Hue bridge's local
+#: certificate: "root-bridge" (Philips Hue, 2017 to 2038) and "Hue Root CA 01" (Signify Hue, from
+#: 2025). A bridge call is verified against these, so the application key goes only to a real bridge.
+_HUE_ROOT_CA = """\
+-----BEGIN CERTIFICATE-----
+MIICMjCCAdigAwIBAgIUO7FSLbaxikuXAljzVaurLXWmFw4wCgYIKoZIzj0EAwIw
+OTELMAkGA1UEBhMCTkwxFDASBgNVBAoMC1BoaWxpcHMgSHVlMRQwEgYDVQQDDAty
+b290LWJyaWRnZTAiGA8yMDE3MDEwMTAwMDAwMFoYDzIwMzgwMTE5MDMxNDA3WjA5
+MQswCQYDVQQGEwJOTDEUMBIGA1UECgwLUGhpbGlwcyBIdWUxFDASBgNVBAMMC3Jv
+b3QtYnJpZGdlMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEjNw2tx2AplOf9x86
+aTdvEcL1FU65QDxziKvBpW9XXSIcibAeQiKxegpq8Exbr9v6LBnYbna2VcaK0G22
+jOKkTqOBuTCBtjAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNV
+HQ4EFgQUZ2ONTFrDT6o8ItRnKfqWKnHFGmQwdAYDVR0jBG0wa4AUZ2ONTFrDT6o8
+ItRnKfqWKnHFGmShPaQ7MDkxCzAJBgNVBAYTAk5MMRQwEgYDVQQKDAtQaGlsaXBz
+IEh1ZTEUMBIGA1UEAwwLcm9vdC1icmlkZ2WCFDuxUi22sYpLlwJY81Wrqy11phcO
+MAoGCCqGSM49BAMCA0gAMEUCIEBYYEOsa07TH7E5MJnGw557lVkORgit2Rm1h3B2
+sFgDAiEA1Fj/C3AN5psFMjo0//mrQebo0eKd3aWRx+pQY08mk48=
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+MIIBzDCCAXOgAwIBAgICEAAwCgYIKoZIzj0EAwIwPDELMAkGA1UEBhMCTkwxFDAS
+BgNVBAoMC1NpZ25pZnkgSHVlMRcwFQYDVQQDDA5IdWUgUm9vdCBDQSAwMTAgFw0y
+NTAyMjUwMDAwMDBaGA8yMDUwMTIzMTIzNTk1OVowPDELMAkGA1UEBhMCTkwxFDAS
+BgNVBAoMC1NpZ25pZnkgSHVlMRcwFQYDVQQDDA5IdWUgUm9vdCBDQSAwMTBZMBMG
+ByqGSM49AgEGCCqGSM49AwEHA0IABFfOO0jfSAUXGQ9kjEDzyBrcMQ3ItyA5krE+
+cyvb1Y3xFti7KlAad8UOnAx0FBLn7HZrlmIwm1QnX0fK3LPM13mjYzBhMB0GA1Ud
+DgQWBBTF1pSpsCASX/z0VHLigxU2CAaqoTAfBgNVHSMEGDAWgBTF1pSpsCASX/z0
+VHLigxU2CAaqoTAPBgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBBjAKBggq
+hkjOPQQDAgNHADBEAiAk7duT+IHbOGO4UUuGLAEpyYejGZK9Z7V9oSfnvuQ5BQIg
+IYSgwwxHXm73/JgcU9lAM6c8Bmu3UE3kBIUwBs1qXFw=
+-----END CERTIFICATE-----
+"""
+
+
+def _discovery_context() -> ssl.SSLContext:
+    """discovery.meethue.com is a public service with an ordinary certificate, so verify it fully."""
+    return ssl.create_default_context()
+
+
+def _bridge_context() -> ssl.SSLContext:
+    """Verify a bridge's certificate against the Hue root CAs. Hostname checking stays off, because
+    the certificate names the bridge id and we dial an address: a certificate that chains to a Hue
+    root is itself proof of a genuine bridge."""
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.load_verify_locations(cadata=_HUE_ROOT_CA)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_REQUIRED
+    return ctx
+
+
+def _insecure_context() -> ssl.SSLContext:
+    """No certificate check at all, for an old bridge that serves a self-signed certificate and only
+    when the caller opts in. The key is then sent to whatever answers, so trust the network first."""
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _context_for(url: str) -> ssl.SSLContext:
+    host = urllib.parse.urlsplit(url).hostname or ""
+    return _discovery_context() if host == "discovery.meethue.com" else _bridge_context()
+
+
+def _open(url: str, ctx: ssl.SSLContext, method: str, body: bytes | None, headers: dict,
+          timeout: float) -> tuple[int, bytes]:
     req = urllib.request.Request(url, data=body, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
+
+
+def _https(method: str, url: str, body: bytes | None, headers: dict, timeout: float) -> tuple[int, bytes]:
+    """Verifying transport: the discovery service against the public CAs, a bridge against the Hue
+    roots."""
+    return _open(url, _context_for(url), method, body, headers, timeout)
+
+
+def _https_insecure(method: str, url: str, body: bytes | None, headers: dict, timeout: float) -> tuple[int, bytes]:
+    """Opt-in transport for an old self-signed bridge: no certificate check (discovery is never
+    reached through this)."""
+    return _open(url, _insecure_context(), method, body, headers, timeout)
+
+
+def _transport_for(transport: "Transport | None", insecure: bool) -> "Transport":
+    """A caller's own transport if given, else the verifying one, or the insecure one on opt-in."""
+    return transport or (_https_insecure if insecure else _https)
 
 
 def _json(raw: bytes):
@@ -84,11 +166,13 @@ def discover(timeout: float = 6.0, transport: Transport | None = None) -> list[d
             for b in (found or []) if isinstance(b, dict) and b.get("internalipaddress")]
 
 
-def config(host: str, timeout: float = 6.0, transport: Transport | None = None) -> dict:
+def config(host: str, timeout: float = 6.0, transport: Transport | None = None, *,
+           insecure: bool = False) -> dict:
     """What a bridge says about itself without a key (name, model, bridge id, software version),
-    or {} when nothing answered as a bridge there."""
+    or {} when nothing answered as a bridge there. `insecure=True` skips the certificate check for
+    an old self-signed bridge."""
     try:
-        status, raw = (transport or _https)("GET", f"https://{host}/api/0/config", None, {}, timeout)
+        status, raw = _transport_for(transport, insecure)("GET", f"https://{host}/api/0/config", None, {}, timeout)
     except OSError:
         return {}
     said = _json(raw) if status == 200 else None
@@ -96,7 +180,8 @@ def config(host: str, timeout: float = 6.0, transport: Transport | None = None) 
 
 
 def pair(host: str, app: str = "couchctl#device", *, wait: float = PAIR_WAIT, every: float = 2.0,
-         transport: Transport | None = None, sleep=time.sleep, clock=time.monotonic) -> dict:
+         transport: Transport | None = None, insecure: bool = False,
+         sleep=time.sleep, clock=time.monotonic) -> dict:
     """Ask the bridge for an application key, until its link button is pressed or `wait` passes.
 
     Returns {"outcome": "success", "key": ..., "clientkey": ...} once the bridge hands a key over,
@@ -104,7 +189,7 @@ def pair(host: str, app: str = "couchctl#device", *, wait: float = PAIR_WAIT, ev
     {"outcome": "failure", "why": ...} when the bridge did not answer or refused for another reason.
     `app` is the name the bridge lists the key under ("application#device", at most 40 characters).
     The key is never printed or logged here; the caller keeps it."""
-    send = transport or _https
+    send = _transport_for(transport, insecure)
     body = json.dumps({"devicetype": app[:40], "generateclientkey": True}).encode()
     started, last = clock(), "the bridge did not answer"
     while True:
@@ -181,9 +266,10 @@ def _state(on=None, brightness=None, color=None, kelvin=None, transition_ms=None
 class Bridge:
     """One bridge, reached at `host` with an application key from pair()."""
 
-    def __init__(self, host: str, key: str, *, timeout: float = 8.0, transport: Transport | None = None):
+    def __init__(self, host: str, key: str, *, timeout: float = 8.0, transport: Transport | None = None,
+                 insecure: bool = False):
         self.host, self._key, self.timeout = host, key, timeout
-        self._send = transport or _https
+        self._send = _transport_for(transport, insecure)
 
     def __repr__(self) -> str:      # the key stays out of logs and tracebacks
         return f"Bridge({self.host!r})"
@@ -197,6 +283,11 @@ class Bridge:
         try:
             status, raw = self._send(method, f"https://{self.host}/clip/v2/{path}", raw_body, headers, self.timeout)
         except OSError as e:
+            reason = getattr(e, "reason", e)
+            if isinstance(reason, ssl.SSLCertVerificationError):
+                raise HueError(f"the bridge at {self.host} did not present a trusted Hue certificate. "
+                               "If it is an older bridge with a self-signed certificate, make the "
+                               "Bridge with insecure=True.") from None
             raise HueError(f"the bridge at {self.host} did not answer ({type(e).__name__})") from None
         said = _json(raw)
         errors = [e.get("description", "") for e in (said or {}).get("errors") or []] if isinstance(said, dict) else []

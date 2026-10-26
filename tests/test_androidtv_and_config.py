@@ -9,10 +9,12 @@ from couchctl.cli import main
 from couchctl.config import Device, Redirect, parse
 
 FAKE_ADB = """#!/bin/sh
-# A fake adb. It logs every call and answers from $FAKE_ADB_FRONT. printf, not echo, so a
-# backslash in the command (text input escapes several) is logged exactly as it arrived.
+# A fake adb. It logs every call's arguments to $FAKE_ADB_LOG, and for the type command, which
+# reads the text from stdin, it appends that stdin to $FAKE_ADB_STDIN. So a test can prove the text
+# arrived on stdin and never in the argument log.
 printf '%s\\n' "$*" >> "$FAKE_ADB_LOG"
 case "$*" in
+  *"read -r t"*) [ -n "$FAKE_ADB_DOWN" ] && exit 1; cat >> "$FAKE_ADB_STDIN" ;;
   *"echo ok"*) [ -n "$FAKE_ADB_DOWN" ] && exit 1; echo ok ;;
   *mResumedActivity*) [ -n "$FAKE_ADB_DOWN" ] && exit 1
      echo "  mResumedActivity: ActivityRecord{1 u0 $FAKE_ADB_FRONT/.Main t1}" ;;
@@ -31,6 +33,7 @@ def adb(tmp_path, monkeypatch):
     log = tmp_path / "adb.log"
     monkeypatch.setenv("COUCHCTL_ADB", str(path))
     monkeypatch.setenv("FAKE_ADB_LOG", str(log))
+    monkeypatch.setenv("FAKE_ADB_STDIN", str(tmp_path / "adb.stdin"))   # what the type command read
     monkeypatch.setenv("FAKE_ADB_FRONT", "com.vendor.home")
     return log
 
@@ -64,25 +67,27 @@ def test_launch_uses_the_tv_launcher_category(adb):
     assert "monkey -p com.wanted -c android.intent.category.LEANBACK_LAUNCHER 1" in adb.read_text()
 
 
-def test_escape_for_input_spaces_and_shell_specials():
-    assert androidtv._escape_for_input("a b & c(1)") == r"a%sb%s\&%sc\(1\)"
-    assert androidtv._escape_for_input("plain.text_1@2:3") == "plain.text_1@2:3"
-    assert androidtv._escape_for_input("100%") == "100%"   # a lone % is passed through for `input`
+def test_input_arg_sends_spaces_as_percent_s():
+    assert androidtv._input_arg("a b & c(1)") == "a%sb%s&%sc(1)"   # only spaces change; stdin carries the rest
+    assert androidtv._input_arg("p@ss w0rd!") == "p@ss%sw0rd!"
 
 
-def test_send_text_escapes_and_submit_presses_enter(adb):
-    ok, why = androidtv.send_text(box, "a b & c(1)", submit=True)
+def test_send_text_goes_on_stdin_not_the_argument_list(adb):
+    # the whole point of the fix: text typed here (a password included) must never reach any argv
+    ok, why = androidtv.send_text(box, "hunter2 & co", submit=True)
     assert ok and why == "text sent and submitted"
-    log = adb.read_text()
-    assert r"input text a%sb%s\&%sc\(1\)" in log   # spaces as %s, shell specials backslash-escaped
-    assert "input keyevent KEYCODE_ENTER" in log
+    args = adb.read_text()
+    assert "hunter2" not in args                                 # the words are not on the command line
+    assert 'IFS= read -r t; input text "$t"' in args             # the command that reads from stdin
+    assert (adb.parent / "adb.stdin").read_text() == "hunter2%s&%sco\n"   # the text arrived on stdin
+    assert "input keyevent KEYCODE_ENTER" in args
 
 
 def test_send_text_without_submit_sends_no_enter(adb):
     ok, why = androidtv.send_text(box, "hi there")
     assert ok and why == "text sent"
-    log = adb.read_text()
-    assert "input text hi%sthere" in log and "KEYCODE_ENTER" not in log
+    assert (adb.parent / "adb.stdin").read_text() == "hi%sthere\n"
+    assert "KEYCODE_ENTER" not in adb.read_text()
 
 
 def test_send_text_to_a_device_that_does_not_answer_fails(adb, monkeypatch):
@@ -171,4 +176,6 @@ def test_cli_text_on_an_androidtv_device(tmp_path, adb, capsys):
     assert main(["--config", str(conf), "text", "box", "find me", "--enter"]) == 0
     assert capsys.readouterr().out.strip() == "text sent and submitted"
     log = adb.read_text()
-    assert "input text find%sme" in log and "input keyevent KEYCODE_ENTER" in log
+    assert "find" not in log                                              # the text is on stdin, not in argv
+    assert (adb.parent / "adb.stdin").read_text() == "find%sme\n"
+    assert 'IFS= read -r t; input text "$t"' in log and "input keyevent KEYCODE_ENTER" in log

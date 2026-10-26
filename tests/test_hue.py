@@ -201,3 +201,23 @@ def test_cli_state_leaves_a_bridge_out(tmp_path, monkeypatch, capsys):
     cfg.write_text('[devices.lights]\nkind = "hue"\nhost = "192.0.2.40"\n')
     monkeypatch.setattr(power, "state", lambda *a, **k: pytest.fail("a bridge is not a screen"))
     assert main(["--config", str(cfg), "state"]) == 0
+
+
+def test_discovery_is_verified_and_a_bridge_is_checked_against_the_hue_roots():
+    import ssl
+    assert hue._discovery_context().verify_mode == ssl.CERT_REQUIRED
+    assert hue._discovery_context().check_hostname is True
+    bridge = hue._bridge_context()
+    assert bridge.verify_mode == ssl.CERT_REQUIRED
+    assert bridge.check_hostname is False          # the certificate names the bridge id, not the address
+    assert len(bridge.get_ca_certs()) == 2         # both Hue roots are trusted
+    assert hue._insecure_context().verify_mode == ssl.CERT_NONE
+
+
+def test_the_transport_is_chosen_by_url_and_the_insecure_opt_in():
+    assert hue._context_for(hue.DISCOVERY_URL).check_hostname is True                  # discovery: full check
+    assert hue._context_for("https://192.0.2.40/clip/v2/x").check_hostname is False    # a bridge: chain only
+    assert hue._transport_for(None, False) is hue._https
+    assert hue._transport_for(None, True) is hue._https_insecure
+    mine = lambda *a: (200, b"[]")
+    assert hue._transport_for(mine, True) is mine                                      # a caller's own transport wins
