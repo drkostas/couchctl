@@ -91,6 +91,36 @@ def test_send_text_to_a_device_that_does_not_answer_fails(adb, monkeypatch):
     assert not ok and "did not answer" in why
 
 
+def test_send_keys_presses_each_dpad_key_over_adb(adb):
+    ok, why = androidtv.send_keys(box, ["left", "down", "ok"], pace=0)
+    assert ok
+    log = adb.read_text()
+    assert "input keyevent KEYCODE_DPAD_LEFT" in log
+    assert "input keyevent KEYCODE_DPAD_DOWN" in log
+    assert "input keyevent KEYCODE_DPAD_CENTER" in log
+
+
+def test_send_keys_with_nothing_touches_adb_not_at_all(adb):
+    ok, why = androidtv.send_keys(box, [], pace=0)
+    assert ok and "nothing" in why
+    assert not adb.exists()           # no adb call was made at all
+
+
+def test_type_on_keyboard_walks_the_grid_over_adb(adb):
+    from couchctl import keyboard
+    ok, why = androidtv.type_on_keyboard(box, "cat", keyboard.KEYMAPS["youtube"], pace=0)
+    assert ok and "3 characters" in why
+    log = adb.read_text()
+    assert log.count("input keyevent KEYCODE_DPAD_CENTER") == 3   # a select per letter
+    assert "input keyevent KEYCODE_DPAD_RIGHT" in log and "input keyevent KEYCODE_DPAD_DOWN" in log
+
+
+def test_send_keys_stops_when_the_device_stops_answering(adb, monkeypatch):
+    monkeypatch.setenv("FAKE_ADB_DOWN", "1")
+    ok, why = androidtv.send_keys(box, ["left", "ok"], pace=0)
+    assert not ok and "did not answer" in why
+
+
 def test_config_parses_and_defaults_the_adb_port():
     cfg = parse({"devices": {
         "tv": {"kind": "samsung", "host": "10.0.0.2", "redirect": [{"from": "1", "to": "2", "name": "a to b"}]},

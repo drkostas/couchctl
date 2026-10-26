@@ -64,6 +64,31 @@ def test_send_text_types_the_string_and_submit_ends_the_input(tv, token_file):
     assert tv.input_ended == 1                          # submit adds exactly one SendInputEnd
 
 
+def test_send_keys_presses_each_move_in_order(tv, token_file):
+    samsung.pair(tv.device(), token_file)
+    ok, _ = samsung.send_keys(tv.device(), token_file, ["left", "down", "ok"], pace=0)
+    assert ok and tv.keys == ["KEY_LEFT", "KEY_DOWN", "KEY_ENTER"]
+
+
+def test_send_keys_with_nothing_opens_no_connection(tv, token_file):
+    ok, why = samsung.send_keys(tv.device(), token_file, [], pace=0)
+    assert ok and "nothing" in why and tv.keys == []
+
+
+def test_type_on_keyboard_walks_the_grid_to_the_letters(tv, token_file):
+    from couchctl import keyboard
+    samsung.pair(tv.device(), token_file)
+    ok, why = samsung.type_on_keyboard(tv.device(), token_file, "cat",
+                                       keyboard.KEYMAPS["youtube"], pace=0)
+    assert ok and "3 characters" in why
+    assert tv.keys == [
+        "KEY_RIGHT", "KEY_RIGHT", "KEY_ENTER",                       # c
+        "KEY_LEFT", "KEY_LEFT", "KEY_ENTER",                         # a
+        "KEY_RIGHT", "KEY_RIGHT", "KEY_RIGHT", "KEY_RIGHT", "KEY_RIGHT",
+        "KEY_DOWN", "KEY_DOWN", "KEY_ENTER"]                         # t
+    assert tv.typed == []   # nothing goes through the set's own keyboard, only remote keys
+
+
 def test_a_prompt_nobody_answers_is_named_and_no_key_is_sent(token_file, monkeypatch):
     """A set that no longer accepts the held token asks on its screen and, after its prompt time,
     says ms.channel.timeOut. The client must wait past that time to hear it, and must not report
