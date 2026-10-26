@@ -1,6 +1,6 @@
 ---
 name: couchctl
-description: Take control of the Samsung Tizen televisions and Android TV projectors or boxes on a home network with couchctl. Use when asked to find the screens and their app ids, pair a Samsung set, read or switch power, open apps, press remote keys, send a remote's app buttons to different apps, run the button watcher on an always-on host, install an ad-blocking YouTube client on a TV, or diagnose a screen that reads the wrong state, ignores wake-on-LAN or stops answering adb.
+description: Take control of the Samsung Tizen televisions, Android TV projectors or boxes, and Philips Hue lights on a home network with couchctl. Use when asked to pair a Hue bridge or switch, dim or color its lights, rooms and scenes, or to find the screens and their app ids, pair a Samsung set, read or switch power, open apps, press remote keys, send a remote's app buttons to different apps, run the button watcher on an always-on host, install an ad-blocking YouTube client on a TV, or diagnose a screen that reads the wrong state, ignores wake-on-LAN or stops answering adb.
 ---
 
 # couchctl
@@ -168,6 +168,17 @@ A Samsung set installs only packages signed with a distributor certificate that 
 
 Routes that fail and cost hours, so skip them. A package signed by its author, the SDK's public or partner certificates, the USB demo package route (its certificate has expired and the service that issued it is closed), and desktop installers that reimplement sdb (they fail against sets that report `secure_protocol:enabled`).
 
+## Philips Hue lights
+
+A Hue bridge is `kind = "hue"` with its `host`. It needs a wired port on the router's network and gets its address by DHCP, so reserve that address in the router once it appears (its hardware address starts with `ec:b5:fa` or `00:17:88`).
+
+1. Find it: `couchctl hue discover` asks the vendor's discovery service, which lists the bridges that reported in from the same public address. A new bridge can take a few minutes to appear there. The router's client list is the other source. `hue.config(host)` answers without a key, with the bridge's model and id, which proves the address is a bridge.
+2. Pair it: the bridge hands out a key only within about 30 seconds after its round link button is pressed. Start `couchctl pair <device>` (it keeps asking for 30 seconds), then have the person press the button once. When the person cannot be timed exactly, ask in a loop every 2 seconds for longer, from a script of your own, with `hue.pair(host, wait=900)`. The key is a secret: whoever has it controls every light. Keep it out of logs and command lines.
+3. Read before changing: `couchctl hue lights <device>` and `couchctl hue groups <device>`. A light marked not reachable is known to the bridge but not answering on its Zigbee radio (switched off at the wall, out of range, or from an earlier home). Its on or off state is the last one the bridge saw.
+4. Change: `couchctl hue light|group <device> <name> [--on|--off] [--brightness N] [--color #rrggbb] [--kelvin K]`, and `couchctl hue scene <device> <scene> --group <room>`. Scene names repeat across rooms, so name the room. A room or zone is switched through its grouped light in one request, which is gentler on the bridge than one request per light (the bridge accepts about ten light changes a second and one group change a second).
+
+Also worth checking on a bridge that moved house: its time zone (`GET /clip/v2/resource/bridge`), which its schedules and automations run on, and lights left over from the old home, which stay listed as not reachable until they are deleted in the Hue app.
+
 ## Device notes
 
 Samsung Tizen sets. Port 8001 answers without pairing and is enough for state, `info`, `front` and `launch`. Keys and power off need the paired websocket on 8002, which uses a self-signed certificate that couchctl does not verify. Power on needs "Power On with Mobile" and a `mac`. The set shell is locked down (no network or Wi-Fi commands), so read network facts from `couchctl info`.
@@ -195,4 +206,7 @@ Android TV projectors and boxes. State means "adb answers", which couchctl tests
 | A redirect fires on a sideloaded id on one set only | Sideloaded ids carry the certificate prefix | `sdb shell 0 vd_applist` on each set | Give each set its own redirect ids |
 | Android launch says no TV launcher activity | The package has no `LEANBACK_LAUNCHER` entry | `couchctl launch <device> <package>` prints the same message | Install the TV build of the app |
 | A key remapper app records nothing on a projector | The app buttons never reach the input layer | `adb shell getevent -lq` while pressing shows nothing | Use the couchctl redirect instead |
+| `couchctl pair` on a Hue bridge prints refused | Nobody pressed the link button within the 30 seconds | The bridge is on and answers `couchctl hue discover` or `hue.config` | Press the round button on the bridge, then run pair again within 30 seconds |
+| Every Hue light reads not reachable | The lights are off at the wall, or the bridge lists lights from an earlier home | `couchctl hue lights <device>` again after switching one light on at the wall | Power the lights. Delete lights that are gone in the Hue app |
+| A Hue command says the bridge does not accept the key | The bridge was reset, or the key was deleted in the Hue app | `couchctl hue lights <device>` | `couchctl pair <device> --again` with the button pressed |
 | The adb trust prompt returns after reboot | "Always allow" was not ticked | `adb devices` shows `unauthorized` | Accept again with the box ticked |

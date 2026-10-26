@@ -11,6 +11,10 @@
     kind = "androidtv"
     adb = "192.168.1.30:5555"        # how adb reaches it
 
+    [devices.lights]
+    kind = "hue"                     # a Philips Hue bridge; `couchctl pair lights` gets its key
+    host = "192.168.1.40"
+
     [[devices.living-room.redirect]]
     from = "3201910019365"           # the app the button opens
     to = "3201606009684"             # the app to open instead
@@ -28,7 +32,9 @@ if sys.version_info >= (3, 11):
 else:  # pragma: no cover
     import tomli as tomllib
 
-KINDS = ("samsung", "androidtv")
+KINDS = ("samsung", "androidtv", "hue")
+#: the kinds that are screens, which power, apps and the button watcher act on
+SCREENS = ("samsung", "androidtv")
 DEFAULT_TOKENS = "~/.config/couchctl/tokens.json"
 
 
@@ -79,8 +85,8 @@ def parse(data: dict) -> Config:
         if kind not in KINDS:
             problems.append(f"devices.{name}.kind must be one of {', '.join(KINDS)}")
             continue
-        if kind == "samsung" and not d.get("host"):
-            problems.append(f"devices.{name}.host is required for a samsung device")
+        if kind in ("samsung", "hue") and not d.get("host"):
+            problems.append(f"devices.{name}.host is required for a {kind} device")
         if kind == "androidtv" and not (d.get("adb") or d.get("host")):
             problems.append(f"devices.{name} needs adb (host:port) or host for an androidtv device")
         redirects = []
