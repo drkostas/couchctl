@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Mapping
 
 from .config import Device
@@ -122,3 +123,41 @@ def send_text(dev: Device, text: str, *, submit: bool = False,
     if submit and shell(dev.adb, "input keyevent KEYCODE_ENTER", env=env) is None:
         return False, "the text was typed but ENTER did not reach the device"
     return True, "text sent and submitted" if submit else "text sent"
+
+
+_MOVE_KEYCODE = {"left": "KEYCODE_DPAD_LEFT", "right": "KEYCODE_DPAD_RIGHT",
+                 "up": "KEYCODE_DPAD_UP", "down": "KEYCODE_DPAD_DOWN", "ok": "KEYCODE_DPAD_CENTER"}
+
+
+def send_keys(dev: Device, moves, *, pace: float = 0.2,
+              env: Mapping[str, str] | None = None) -> tuple[bool, str]:
+    """Press a run of remote keys over adb, `pace` seconds apart.
+
+    `moves` are the abstract names `keyboard.plan` emits ("left", "right", "up", "down", "ok"),
+    each mapped to the matching Android key event. Each press is its own `input keyevent`, with a
+    short wait between so the on-screen highlight moves before the next.
+    """
+    codes = [_MOVE_KEYCODE[m] for m in moves]
+    if not codes:
+        return True, "nothing to type"
+    for i, code in enumerate(codes):
+        if i:
+            time.sleep(pace)
+        if shell(dev.adb, f"input keyevent {code}", env=env) is None:
+            return False, "the device did not answer adb"
+    return True, f"{len(codes)} keys sent"
+
+
+def type_on_keyboard(dev: Device, text: str, keymap, *, submit: bool = False, pace: float = 0.2,
+                     env: Mapping[str, str] | None = None) -> tuple[bool, str]:
+    """Type `text` into an app's own on-screen search keyboard by walking it with the remote,
+    over adb, for an app that ignores injected text. `keymap` is a `keyboard.Keymap`; see that
+    module. It works only while that search keyboard is open with its highlight still on the key
+    the app started it on.
+    """
+    from . import keyboard
+    moves = keyboard.plan(keymap, text, submit=submit)
+    ok, msg = send_keys(dev, moves, pace=pace, env=env)
+    if ok and moves:
+        return True, f"typed {len(text)} characters with {len(moves)} key presses"
+    return ok, msg

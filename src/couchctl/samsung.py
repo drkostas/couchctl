@@ -93,9 +93,10 @@ def _unanswered(dev: Device) -> str:
             f"`couchctl pair {dev.name} --again` with someone at the set to allow it")
 
 
-async def _talk(dev: Device, token: str | None, payloads: list[dict] | None = None, timeout: float | None = None):
+async def _talk(dev: Device, token: str | None, payloads: list[dict] | None = None,
+                timeout: float | None = None, pace: float = 0.2):
     """Connect, read the greeting, and send each command in `payloads`, one after another, only if
-    the set opened the channel. Returns (greeting, new token)."""
+    the set opened the channel, `pace` seconds apart. Returns (greeting, new token)."""
     if timeout is None:
         timeout = PROMPT_SECONDS + 10
     from websockets.asyncio.client import connect
@@ -114,7 +115,7 @@ async def _talk(dev: Device, token: str | None, payloads: list[dict] | None = No
         if payloads and greeting.get("event") == "ms.channel.connect":
             for i, payload in enumerate(payloads):
                 if i:
-                    await asyncio.sleep(0.2)  # let the set take each one before the next
+                    await asyncio.sleep(pace)  # let the set take each one before the next
                 await ws.send(json.dumps(payload))
             await asyncio.sleep(1.0)  # give the set a moment to act before the socket closes
         return greeting, fresh
@@ -142,8 +143,8 @@ def pair(dev: Device, token_file, timeout: float = PROMPT_SECONDS + 10) -> tuple
     return "success", "paired"
 
 
-def _send(dev: Device, token_file, payloads: list[dict], done: str) -> tuple[bool, str]:
-    """Open the remote channel with the held token and send each message on it.
+def _send(dev: Device, token_file, payloads: list[dict], done: str, pace: float = 0.2) -> tuple[bool, str]:
+    """Open the remote channel with the held token and send each message on it, `pace` apart.
 
     The token and greeting handling every remote command needs lives here once: the set must be
     answering, token-auth sets must be paired, and a command counts as sent only when the set
@@ -156,7 +157,7 @@ def _send(dev: Device, token_file, payloads: list[dict], done: str) -> tuple[boo
     if said.get("TokenAuthSupport") == "true" and not token:
         return False, f"not paired: run `couchctl pair {dev.name}` once and allow the prompt on the television"
     try:
-        greeting, fresh = asyncio.run(_talk(dev, token, payloads))
+        greeting, fresh = asyncio.run(_talk(dev, token, payloads, pace=pace))
     except Exception as e:  # noqa: BLE001
         return False, f"{type(e).__name__}: {str(e)[:140]}"
     if greeting.get("event") == "ms.channel.unauthorized":
@@ -177,6 +178,41 @@ def send_key(dev: Device, token_file, key: str) -> tuple[bool, str]:
         "params": {"Cmd": "Click", "DataOfCmd": key, "Option": "false", "TypeOfRemote": "SendRemoteKey"},
     }
     return _send(dev, token_file, [payload], f"{key} sent")
+
+
+_REMOTE_MOVE = {"left": "KEY_LEFT", "right": "KEY_RIGHT", "up": "KEY_UP",
+                "down": "KEY_DOWN", "ok": "KEY_ENTER"}
+
+
+def send_keys(dev: Device, token_file, moves, *, pace: float = 0.35) -> tuple[bool, str]:
+    """Press a run of remote keys on one connection, `pace` seconds apart.
+
+    `moves` are the abstract names `keyboard.plan` emits ("left", "right", "up", "down", "ok"),
+    each mapped to the matching remote key. The pace is slower than a single key's default so the
+    on-screen highlight has time to move before the next press.
+    """
+    payloads = [{"method": "ms.remote.control",
+                 "params": {"Cmd": "Click", "DataOfCmd": _REMOTE_MOVE[m], "Option": "false",
+                            "TypeOfRemote": "SendRemoteKey"}} for m in moves]
+    if not payloads:
+        return True, "nothing to type"
+    return _send(dev, token_file, payloads, f"{len(payloads)} keys sent", pace=pace)
+
+
+def type_on_keyboard(dev: Device, token_file, text: str, keymap, *, submit: bool = False,
+                     pace: float = 0.35) -> tuple[bool, str]:
+    """Type `text` into an app's own on-screen search keyboard by walking it with the remote.
+
+    `keymap` is a `keyboard.Keymap` describing that app's grid. It works only while that search
+    keyboard is open and its highlight is still on the key the app started it on. See the
+    `keyboard` module.
+    """
+    from . import keyboard
+    moves = keyboard.plan(keymap, text, submit=submit)
+    ok, msg = send_keys(dev, token_file, moves, pace=pace)
+    if ok and moves:
+        return True, f"typed {len(text)} characters with {len(moves)} key presses"
+    return ok, msg
 
 
 def send_text(dev: Device, token_file, text: str, *, submit: bool = False) -> tuple[bool, str]:

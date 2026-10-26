@@ -86,9 +86,12 @@ couchctl front projector           # the package in front
 couchctl front tv-a <id> <id>      # which of these Samsung ids is visible
 couchctl text tv-a "jazz radio"    # type into the open text field
 couchctl text tv-a "jazz radio" --enter   # type, then submit
+couchctl keyboard tv-a youtube "disco set"  # walk an app's own keyboard to type it
 ```
 
 `couchctl text` types into whatever text field the screen has open, which saves pecking at an on-screen keyboard with the remote. Open the field first (a search box, a login field), then send the words; `--enter` submits. The screen reports nothing about what reached it, so look at it to confirm. A Samsung set takes the text over the remote websocket and so needs pairing, exactly as a key does, and only while its keyboard is up; an Android TV takes it over adb, where `input text` sends spaces as `%s` and escapes the shell's special characters for you.
+
+`couchctl text` only works where the screen uses the set's system keyboard. Some apps do not: YouTube and the clients built on its television interface, and some others, draw their own grid of letters that you move through with the remote, and injected text never reaches it (the set still reports success). `couchctl keyboard <device> <app> "<words>"` reaches that field the only way that works, by walking the app's own grid with the remote's arrow keys and pressing select on each letter. Each app's keyboard is a small map (its grid, the key it highlights when its search opens, where space sits, above or below the letters); the known ones are built in (`youtube`, `netflix`), and `couchctl keyboard` with no app lists them. The presses go over the remote websocket on a Samsung set and over adb on an Android television. It depends on that search being open with its highlight still on the key the app started it on, so open the app's search and then type, before moving the highlight by hand.
 
 `couchctl off` reads the state again first and refuses when the screen is not answering, because on these devices a power key sent to a sleeping screen can wake it. `couchctl on` sends the packet every 2 seconds and reports `success` only once the screen answers, or `failure` after 25 seconds. A set switched off moments earlier is still shutting down for several seconds and ignores a packet sent then, which is why it keeps sending.
 

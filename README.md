@@ -46,6 +46,7 @@ couchctl on living-room           # wake-on-LAN
 couchctl launch living-room 3201606009684
 couchctl key living-room KEY_HOME
 couchctl text living-room "jazz radio" --enter   # type into the open field, then submit
+couchctl keyboard living-room youtube "disco set"  # walk an app's own keyboard to type it
 couchctl front living-room        # which redirected app is on screen
 couchctl watch                    # redirect the app buttons until stopped
 couchctl watch --dry-run          # log presses without launching anything
@@ -84,6 +85,12 @@ The set answers HTTP on port 8001 without a password. That is enough to read its
 `couchctl on` sends a wake-on-LAN packet to the `mac` in the config every 2 seconds until the set answers, for up to 25 seconds, and says whether it came on. The set only answers it when "Power on with mobile" is enabled (Settings, General, Network, Expert settings on most models).
 
 A Samsung app id is the long number in the Samsung app store (3201606009684 is Spotify), or for a sideloaded app the id its package declares. To find the id behind a button, press the button and run `couchctl front <device> <id> <id> ...` with the ids you suspect, or read the list from the set with `sdb shell 0 vd_applist` if you have Tizen Studio.
+
+## Typing into an app that has its own keyboard
+
+Some apps do not use the set's system keyboard. They draw their own grid of letters on screen that you move through with the remote (YouTube and the clients built on its television interface are the common ones, and some others). `couchctl text` cannot reach such a field, because there is no system keyboard for the injected text to fill, and the set reports success all the same. `couchctl keyboard <device> <app> "<words>"` reaches it the only way that works, by walking that grid with the remote's arrow keys and pressing select on each letter.
+
+Each app's keyboard is described by a small map of its grid, the key it highlights when its search opens, and where space sits (which may be a row above the letters or below them). The known ones are built in (`youtube` and `netflix` today), and an unknown app name prints the list. The presses go over the remote websocket on a Samsung set and over adb on an Android television. It works only while that search keyboard is open and its highlight is still on the key the app started it on, so open the app's search and then type, before moving the highlight by hand. `--enter` presses the app's search button at the end, for keyboards whose button position is known.
 
 ## Sideloaded apps
 

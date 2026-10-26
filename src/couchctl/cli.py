@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 import urllib.request
 
-from . import __version__, androidtv, hue, power, redirect, samsung, sideload
+from . import __version__, androidtv, hue, keyboard, power, redirect, samsung, sideload
 from . import tokens as token_store
 from .config import SCREENS, Config, default_path, load
 
@@ -158,6 +158,20 @@ def cmd_hue(cfg, args) -> int:
     return 0
 
 
+def cmd_keyboard(cfg, args) -> int:
+    km = keyboard.KEYMAPS.get(args.app)
+    if km is None:
+        print(f"no keyboard known for {args.app!r}; known: {', '.join(sorted(keyboard.KEYMAPS))}")
+        return 1
+    dev = cfg.device(args.device)
+    if dev.kind == "androidtv":
+        ok, why = androidtv.type_on_keyboard(dev, args.text, km, submit=args.enter)
+    else:
+        ok, why = samsung.type_on_keyboard(dev, cfg.token_file, args.text, km, submit=args.enter)
+    print(why)
+    return 0 if ok else 1
+
+
 def cmd_launch(cfg, args) -> int:
     ok, why = redirect.launch(cfg.device(args.device), args.app)
     print(why)
@@ -278,6 +292,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("text")
     s.add_argument("--enter", action="store_true", help="press Enter after, to submit")
     s.set_defaults(fn=cmd_text)
+
+    s = sub.add_parser("keyboard", help="type into an app's own on-screen search keyboard by "
+                       "walking it with the remote, for apps that ignore typed text (YouTube and "
+                       "the like)")
+    s.add_argument("device")
+    s.add_argument("app", help="which app's keyboard: " + ", ".join(sorted(keyboard.KEYMAPS)))
+    s.add_argument("text")
+    s.add_argument("--enter", action="store_true", help="press the search button after")
+    s.set_defaults(fn=cmd_keyboard)
 
     s = sub.add_parser("launch", help="open an app by its id (samsung) or package (androidtv)")
     s.add_argument("device")
