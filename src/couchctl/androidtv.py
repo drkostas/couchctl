@@ -21,13 +21,17 @@ def adb_path(env: Mapping[str, str] | None = None) -> str | None:
     return src.get("COUCHCTL_ADB") or shutil.which("adb", path=src.get("PATH"))
 
 
-def shell(target: str, cmd: str, timeout: float = 8.0, *, env: Mapping[str, str] | None = None) -> str | None:
-    """One adb shell command, or None if the device did not answer."""
+def shell(target: str, cmd: str, timeout: float = 8.0, *, stdin: str | None = None,
+          env: Mapping[str, str] | None = None) -> str | None:
+    """One adb shell command, or None if the device did not answer. `stdin`, when given, is fed to
+    the command's standard input, which adb forwards to the device shell: text passed this way never
+    appears in any process's argument list (`send_text`)."""
     adb = adb_path(env)
     if not adb:
         return None
     try:
-        r = subprocess.run([adb, "-s", target, "shell", cmd], capture_output=True, text=True, timeout=timeout, env=env)
+        r = subprocess.run([adb, "-s", target, "shell", cmd], input=stdin,
+                           capture_output=True, text=True, timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
     return r.stdout if r.returncode == 0 else None
@@ -84,41 +88,32 @@ def power_key(dev: Device, *, env: Mapping[str, str] | None = None) -> tuple[boo
     return (True, "power key sent") if out is not None else (False, "the device did not answer adb")
 
 
-#: characters that need no escaping: letters, digits, and punctuation the device shell and `input`
-#: both pass through untouched. Everything else is backslash-escaped, and a space becomes `%s`.
-_SAFE = "_-+./@,:"
+#: what the device shell runs to type: it reads the text from its own standard input into `t` and
+#: hands that to `input text`, so the text never sits on a command line. `IFS=` and `read -r` keep
+#: it exactly as sent, every character and backslash.
+_TYPE_CMD = 'IFS= read -r t; input text "$t"'
 
 
-def _escape_for_input(text: str) -> str:
-    """Make `text` safe as the single argument to `input text` over `adb shell`.
-
-    Two layers read it. The device's own shell parses the command first, so every character it
-    treats specially (quotes, spaces, `;`, `&`, `|`, `$`, `(`, and the rest) is backslash-escaped
-    to reach `input` as itself. Then `input text` turns `%s` back into a space, which is why a
-    space is sent as `%s` rather than as a literal the shell would split on. The one sequence this
-    cannot carry is a literal `%s` a caller types: `input` always reads it as a space.
-    """
-    out = []
-    for ch in text:
-        if ch == " ":
-            out.append("%s")
-        elif ch == "%" or ch.isalnum() or ch in _SAFE:
-            out.append(ch)           # `%` is left alone; `input` only treats `%s` specially
-        else:
-            out.append("\\" + ch)
-    return "".join(out)
+def _input_arg(text: str) -> str:
+    """`text` with the one rule `input text` applies: a space is sent as `%s`, which `input` turns
+    back into a space (otherwise it would split the word). Every other character is sent as itself,
+    because it travels on standard input inside a quoted variable and the device shell never parses
+    it. A literal `%s` a caller types cannot be carried, since `input` always reads it as a space."""
+    return text.replace(" ", "%s")
 
 
 def send_text(dev: Device, text: str, *, submit: bool = False,
               env: Mapping[str, str] | None = None) -> tuple[bool, str]:
     """Type `text` into the focused field over adb, and press Enter when `submit` is set.
 
-    The field has to be focused already (a search box, a login field); `input text` types wherever
-    the cursor is and reports nothing about where that was, so a caller that must know the text
-    landed has to look at the screen. `submit` sends KEYCODE_ENTER, which a search field reads as
-    "search".
+    The text is handed to the device on standard input, never as a command-line argument, so it does
+    not appear in any process's argument list on this machine or in the device's own `ps` (a password
+    typed into a login field included). The field has to be focused already (a search box, a login
+    field); `input text` types wherever the cursor is and reports nothing about where that was, so a
+    caller that must know the text landed has to look at the screen. `submit` sends KEYCODE_ENTER,
+    which a search field reads as "search".
     """
-    if text and shell(dev.adb, f"input text {_escape_for_input(text)}", env=env) is None:
+    if text and shell(dev.adb, _TYPE_CMD, stdin=_input_arg(text) + "\n", env=env) is None:
         return False, "the device did not answer adb"
     if submit and shell(dev.adb, "input keyevent KEYCODE_ENTER", env=env) is None:
         return False, "the text was typed but ENTER did not reach the device"
