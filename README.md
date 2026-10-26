@@ -2,7 +2,7 @@
 
 # couchctl
 
-couchctl controls Samsung (Tizen) televisions and Android TV devices on your home network. It reads whether each screen is on, switches it on and off, opens apps, and sends the remote's app buttons to the apps you actually use.
+couchctl controls Samsung (Tizen) televisions and Android TV devices on your home network. It reads whether each screen is on, switches it on and off, opens apps, and sends the remote's app buttons to the apps you actually use. It also switches, dims and colors Philips Hue lights through their bridge.
 
 Most remotes have buttons for apps you may never open (Prime Video, Disney+, a local streaming service). These buttons cannot be remapped on the device. couchctl watches which app is in front, and when a button opens one of those apps it opens your chosen app on top.
 
@@ -52,6 +52,30 @@ couchctl watch --dry-run          # log presses without launching anything
 couchctl sideload living-room app.wgt --sign myprofile   # install or update a sideloaded app
 couchctl sideload projector app.apk --package com.example.player
 ```
+
+## Philips Hue lights
+
+A Hue bridge is a device of kind `hue` with its address:
+
+```toml
+[devices.lights]
+kind = "hue"
+host = "192.168.1.40"
+```
+
+```bash
+couchctl hue discover                         # find the bridge's address (needs internet)
+couchctl pair lights                          # press the bridge's round button, then run this within 30 s
+couchctl hue lights lights                    # every light: on or off, brightness, reachable
+couchctl hue groups lights                    # rooms and zones
+couchctl hue light lights "Desk lamp" --on --brightness 40 --color "#ff8800"
+couchctl hue group lights "Living room" --off
+couchctl hue scene lights Relax --group "Living room"
+```
+
+The bridge gives a key only within about 30 seconds of its link button being pressed, and that press is the permission: nothing can take a key without it. `pair` keeps asking for those 30 seconds, so the button can be pressed before or just after starting it. The key goes in the same token file as the televisions' tokens. Lights, rooms and scenes are found by name or by their id on the bridge, so set them up in the Hue app and use the names you gave them there.
+
+From Python, `couchctl.hue` has `discover`, `config`, `pair` and a `Bridge` with `lights()`, `groups()`, `scenes()`, `set_light()`, `set_group()` and `recall_scene()`. It uses the bridge's local CLIP v2 API over HTTPS. The bridge's certificate is signed by the vendor's own authority, so the connection is encrypted but the certificate is not checked, as most local Hue clients do. Use it on a network you trust.
 
 ## Samsung televisions
 

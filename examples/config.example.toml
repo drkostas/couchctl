@@ -24,3 +24,7 @@ adb = "192.168.1.30:5555"
 from = "com.netflix.ninja"
 to = "com.spotify.tv.android"
 name = "Netflix button to Spotify"
+
+[devices.lights]
+kind = "hue"                     # a Philips Hue bridge: couchctl pair lights, with its button pressed
+host = "192.168.1.40"

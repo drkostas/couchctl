@@ -11,9 +11,9 @@ import tempfile
 from pathlib import Path
 import urllib.request
 
-from . import __version__, androidtv, power, redirect, samsung, sideload
+from . import __version__, androidtv, hue, power, redirect, samsung, sideload
 from . import tokens as token_store
-from .config import Config, default_path, load
+from .config import SCREENS, Config, default_path, load
 
 
 def _say(*parts) -> None:
@@ -21,7 +21,8 @@ def _say(*parts) -> None:
 
 
 def _targets(cfg: Config, names: list[str]):
-    return [cfg.device(n) for n in names] if names else list(cfg.devices.values())
+    """The named devices, or every screen in the config (a Hue bridge is not a screen)."""
+    return [cfg.device(n) for n in names] if names else [d for d in cfg.devices.values() if d.kind in SCREENS]
 
 
 def cmd_state(cfg, args) -> int:
@@ -43,6 +44,20 @@ def cmd_info(cfg, args) -> int:
 
 def cmd_pair(cfg, args) -> int:
     dev = cfg.device(args.device)
+    if dev.kind == "hue":
+        if args.again:
+            token_store.forget(cfg.token_file, dev.name)
+        elif token_store.read(cfg.token_file, dev.name):
+            print(f"success: {dev.name} is already paired (use --again to pair it again)")
+            return 0
+        print(f"Press the round link button on {dev.name} now. Waiting {hue.PAIR_WAIT:.0f} seconds.", flush=True)
+        out = hue.pair(dev.host, "couchctl#" + dev.name)
+        if out["outcome"] != "success":
+            print(f"{out['outcome']}: {out['why']}")
+            return 1
+        token_store.write(cfg.token_file, dev.name, out["key"])
+        print(f"success: {dev.name} is paired, and its key is kept in {cfg.token_file}")
+        return 0
     if dev.kind != "samsung":
         print(f"{dev.name} is an androidtv device; allow the adb prompt on its screen instead", file=sys.stderr)
         return 2
@@ -85,6 +100,62 @@ def cmd_text(cfg, args) -> int:
         ok, why = samsung.send_text(dev, cfg.token_file, args.text, submit=args.enter)
     print(why)
     return 0 if ok else 1
+
+
+def _bridge(cfg, name: str) -> hue.Bridge:
+    dev = cfg.device(name)
+    if dev.kind != "hue":
+        raise KeyError(f"{dev.name} is not a hue bridge")
+    key = token_store.read(cfg.token_file, dev.name)
+    if not key:
+        raise KeyError(f"{dev.name} is not paired yet: run couchctl pair {dev.name}")
+    return hue.Bridge(dev.host, key)
+
+
+def _hue_change(args) -> dict:
+    return {"on": args.on, "brightness": args.brightness, "color": args.color, "kelvin": args.kelvin,
+            "transition_ms": args.transition}
+
+
+def cmd_hue(cfg, args) -> int:
+    if args.action == "discover":
+        found = hue.discover()
+        for b in found:
+            said = hue.config(b["host"])
+            print(f"{b['host']}  {said.get('name', '?')}  {said.get('modelid', '?')}  id {b['id']}")
+        if not found:
+            print("no bridge found (the discovery service can list a new bridge a few minutes late)")
+        return 0 if found else 1
+    if not args.device:
+        print(f"hue {args.action} needs the bridge's device name", file=sys.stderr)
+        return 2
+    bridge = _bridge(cfg, args.device)
+    try:
+        if args.action == "lights":
+            for x in bridge.lights():
+                level = "" if x["brightness"] is None else f" {x['brightness']:.0f}%"
+                reach = " (not reachable)" if x["reachable"] is False else ""
+                print(f"{x['name']}: {'on' if x['on'] else 'off'}{level}{reach}")
+        elif args.action == "groups":
+            for g in bridge.groups():
+                print(f"{g['kind']} {g['name']}: {len(g['lights'])} lights")
+        elif args.action == "scenes":
+            names = {g["id"]: g["name"] for g in bridge.groups()}
+            for x in bridge.scenes():
+                print(f"{x['name']} ({names.get(x['group'], x['group_kind'] or 'everywhere')})")
+        elif args.action == "light":
+            light = bridge.set_light(args.target, **_hue_change(args))
+            print(f"changed {light['name']}")
+        elif args.action == "group":
+            group = bridge.set_group(args.target, **_hue_change(args))
+            print(f"changed {group['name']}")
+        elif args.action == "scene":
+            scene = bridge.recall_scene(args.target, group=args.group)
+            print(f"showing {scene['name']}")
+    except (hue.HueError, ValueError) as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    return 0
 
 
 def cmd_launch(cfg, args) -> int:
@@ -187,7 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("device")
     s.set_defaults(fn=cmd_info)
 
-    s = sub.add_parser("pair", help="get a remote-control token from a samsung set")
+    s = sub.add_parser("pair", help="get a remote-control token from a samsung set, or a key from a hue bridge")
     s.add_argument("device")
     s.add_argument("--again", action="store_true", help="forget the held token first")
     s.set_defaults(fn=cmd_pair)
@@ -234,6 +305,20 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--report-token-env", help="name of an environment variable holding a bearer token for --report-url")
     s.set_defaults(fn=cmd_watch)
 
+    s = sub.add_parser("hue", help="Philips Hue lights through the bridge: discover, lights, groups, scenes, light, group, scene")
+    s.add_argument("action", choices=("discover", "lights", "groups", "scenes", "light", "group", "scene"))
+    s.add_argument("device", nargs="?", help="the bridge's name in the config (not needed for discover)")
+    s.add_argument("target", nargs="?", help="light, room, zone or scene, by name or id")
+    onoff = s.add_mutually_exclusive_group()
+    onoff.add_argument("--on", dest="on", action="store_const", const=True, default=None)
+    onoff.add_argument("--off", dest="on", action="store_const", const=False)
+    s.add_argument("--brightness", type=float, help="0 to 100; 0 switches it off")
+    s.add_argument("--color", help="#rrggbb")
+    s.add_argument("--kelvin", type=int, help="a white's color temperature, about 2000 to 6500")
+    s.add_argument("--transition", type=int, help="milliseconds to change over")
+    s.add_argument("--group", help="scene: the room or zone whose scene it is")
+    s.set_defaults(fn=cmd_hue)
+
     s = sub.add_parser("relay", help="relay sdb from 127.0.0.1 to a set, connecting from the address it trusts (needs no config)")
     s.add_argument("target", help="the set's sdb address, HOST:PORT (port 26101)")
     s.add_argument("--from", dest="source", required=True, help="the address the set trusts as its Host PC IP")
@@ -262,6 +347,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "skill":
         print(f"installed {install_skill(args.dir)}")
         return 0
+    if args.cmd == "hue" and args.action == "discover":
+        return cmd_hue(None, args)
     path = args.config or default_path()
     try:
         cfg = load(path)
