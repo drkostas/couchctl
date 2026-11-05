@@ -67,3 +67,42 @@ def test_an_unreachable_target_closes_the_client_and_keeps_listening():
     finally:
         stop.set()
         t.join(5)
+
+
+def test_a_relay_with_no_source_connects_from_the_default_address():
+    seen: list = []
+    target = _echo_server(seen)
+    port = _free_port()
+    ready, stop = threading.Event(), threading.Event()
+    t = threading.Thread(target=relay.serve, args=(None, port, "127.0.0.1", target),
+                         kwargs={"ready": ready, "stop": stop, "say": lambda s: None}, daemon=True)
+    t.start()
+    assert ready.wait(5)
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=5) as c:
+            c.sendall(b"hello")
+            assert c.recv(1024) == b"HELLO"
+        assert seen == ["127.0.0.1"]
+    finally:
+        stop.set()
+        t.join(5)
+
+
+def test_start_runs_a_relay_on_a_free_port_and_stop_ends_it():
+    seen: list = []
+    target = _echo_server(seen)
+    running = relay.start("127.0.0.1", target)
+    try:
+        assert running.address == f"127.0.0.1:{running.port}"
+        with socket.create_connection(("127.0.0.1", running.port), timeout=5) as c:
+            c.sendall(b"abc")
+            assert c.recv(1024) == b"ABC"
+    finally:
+        running.stop()
+    assert not running._thread.is_alive()
+    try:
+        socket.create_connection(("127.0.0.1", running.port), timeout=2).close()
+        refused = False
+    except OSError:
+        refused = True
+    assert refused

@@ -21,6 +21,7 @@ FAKE_SDB = """#!/bin/sh
 echo "$@" >> "$FAKE_SDB_LOG"
 case "$*" in
   "connect "*) [ -n "$FAKE_SDB_REFUSE" ] && { echo "failed to connect to remote target '$2'"; exit 1; }
+               [ "$2" = "$FAKE_SDB_REFUSE_TARGET" ] && { echo "failed to connect to remote target '$2'"; exit 1; }
                echo "connecting to $2 ..."; echo "connected to $2" ;;
   *vd_appinstall*) echo "app_id[Abc123defG.Player] install start"; echo "app_id[Abc123defG.Player] install completed" ;;
   *vd_applist*) [ -z "$FAKE_SDB_HAVE" ] && exit 0
@@ -66,6 +67,8 @@ def sdb(tmp_path, monkeypatch):
     monkeypatch.setenv("COUCHCTL_SDB", str(_script(tmp_path / "sdb", FAKE_SDB)))
     monkeypatch.setenv("FAKE_SDB_LOG", str(log))
     monkeypatch.setenv("FAKE_SDB_HAVE", "2.1.1")
+    # no test set answers on its sdb port unless a test starts one, and a test must not wait on a timeout
+    monkeypatch.setattr(sideload, "_answers", lambda host, port, timeout=3.0: False)
     return log
 
 
@@ -122,6 +125,77 @@ def test_an_install_can_go_through_a_relay_address(sdb, tmp_path):
     assert calls[0] == "connect 127.0.0.1:26102"
     assert all("192.0.2.10" not in c for c in calls)
     assert calls[-2:] == ["disconnect 127.0.0.1:26102", "kill-server"]
+
+
+def _a_set_that_accepts_connections():
+    """A listening socket that stands for the set's sdb port: it accepts and keeps the connection."""
+    import socket
+    import threading
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    held = []
+
+    def accept():
+        while True:
+            try:
+                held.append(srv.accept()[0])
+            except OSError:
+                return
+
+    threading.Thread(target=accept, daemon=True).start()
+    return srv, srv.getsockname()[1]
+
+
+def test_a_set_that_refuses_a_direct_connection_is_reached_through_a_relay(sdb, tmp_path, monkeypatch):
+    import socket
+    srv, port = _a_set_that_accepts_connections()
+    local = Device(name="tv", kind="samsung", host="127.0.0.1")
+    monkeypatch.setattr(sideload, "_answers", lambda host, p, timeout=3.0: True)
+    monkeypatch.setenv("FAKE_SDB_REFUSE_TARGET", f"127.0.0.1:{port}")
+    try:
+        done = sideload.samsung_install(local, make_wgt(tmp_path / "a.wgt"), port=port)
+        assert done.ok and "through a relay" in done.detail
+        calls = sdb.read_text().splitlines()
+        assert calls[0] == f"connect 127.0.0.1:{port}"                 # the direct try came first
+        via = calls[2].split()[1]                                       # then the relay's own address
+        assert calls[2].startswith("connect 127.0.0.1:") and via != f"127.0.0.1:{port}"
+        assert all(f"-s {via}" in c for c in calls if "push" in c or "vd_app" in c)
+        assert calls[-2:] == [f"disconnect {via}", "kill-server"]
+        # the relay does not outlive the install
+        relay_port = int(via.rsplit(":", 1)[1])
+        with __import__("pytest").raises(OSError):
+            socket.create_connection(("127.0.0.1", relay_port), timeout=2).close()
+    finally:
+        srv.close()
+
+
+def test_a_set_that_does_not_answer_gets_no_relay(sdb, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SDB_REFUSE", "1")
+    done = sideload.samsung_install(tv, make_wgt(tmp_path / "a.wgt"))
+    assert not done.ok and "relay was tried" not in done.detail
+    assert sum(c.startswith("connect ") for c in sdb.read_text().splitlines()) == 1
+
+
+def test_a_relay_the_set_refuses_too_says_so(sdb, tmp_path, monkeypatch):
+    srv, port = _a_set_that_accepts_connections()
+    local = Device(name="tv", kind="samsung", host="127.0.0.1")
+    monkeypatch.setattr(sideload, "_answers", lambda host, p, timeout=3.0: True)
+    monkeypatch.setenv("FAKE_SDB_REFUSE", "1")
+    try:
+        done = sideload.samsung_install(local, make_wgt(tmp_path / "a.wgt"), port=port)
+    finally:
+        srv.close()
+    assert not done.ok and "A relay was tried and the set refused that too" in done.detail
+    assert not any("vd_appinstall" in c for c in sdb.read_text().splitlines())
+
+
+def test_an_explicit_sdb_address_is_not_replaced_by_a_relay(sdb, tmp_path, monkeypatch):
+    monkeypatch.setattr(sideload, "_answers", lambda host, p, timeout=3.0: True)
+    monkeypatch.setenv("FAKE_SDB_REFUSE", "1")
+    done = sideload.samsung_install(tv, make_wgt(tmp_path / "a.wgt"), sdb_address="127.0.0.1:26102")
+    assert not done.ok
+    assert sum(c.startswith("connect ") for c in sdb.read_text().splitlines()) == 1
 
 
 def test_keep_server_leaves_the_server_running(sdb, tmp_path):
