@@ -108,6 +108,22 @@ def test_a_refused_connection_says_what_to_check_and_installs_nothing(sdb, tmp_p
     assert sdb.read_text().splitlines()[-1] == "kill-server"
 
 
+def test_a_refused_connection_points_at_the_relay(sdb, tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_SDB_REFUSE", "1")
+    done = sideload.samsung_install(tv, make_wgt(tmp_path / "a.wgt"))
+    assert "couchctl relay" in done.detail and "--sdb" in done.detail
+
+
+def test_an_install_can_go_through_a_relay_address(sdb, tmp_path):
+    done = sideload.samsung_install(tv, make_wgt(tmp_path / "a.wgt"), sdb_address="127.0.0.1:26102")
+    assert done.ok and done.version == "2.1.1"
+    calls = sdb.read_text().splitlines()
+    # every sdb call names the relay, and none names the set: the set refuses a direct connection
+    assert calls[0] == "connect 127.0.0.1:26102"
+    assert all("192.0.2.10" not in c for c in calls)
+    assert calls[-2:] == ["disconnect 127.0.0.1:26102", "kill-server"]
+
+
 def test_keep_server_leaves_the_server_running(sdb, tmp_path):
     sideload.samsung_install(tv, make_wgt(tmp_path / "a.wgt"), keep_server=True)
     assert "kill-server" not in sdb.read_text()
@@ -189,6 +205,14 @@ def test_the_command_installs_on_a_samsung_set(sdb, tmp_path):
     cfg = tmp_path / "config.toml"
     cfg.write_text('[devices.tv]\nkind = "samsung"\nhost = "192.0.2.10"\n')
     assert main(["--config", str(cfg), "sideload", "tv", str(make_wgt(tmp_path / "a.wgt"))]) == 0
+
+
+def test_the_command_takes_the_sdb_address_of_a_relay(sdb, tmp_path):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[devices.tv]\nkind = "samsung"\nhost = "192.0.2.10"\n')
+    assert main(["--config", str(cfg), "sideload", "tv", str(make_wgt(tmp_path / "a.wgt")),
+                 "--sdb", "127.0.0.1:26102"]) == 0
+    assert sdb.read_text().splitlines()[0] == "connect 127.0.0.1:26102"
 
 
 def test_the_command_needs_a_package_for_an_android_device(adb, tmp_path):

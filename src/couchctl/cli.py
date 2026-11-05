@@ -200,7 +200,7 @@ def cmd_sideload(cfg, args) -> int:
         else:
             with tempfile.TemporaryDirectory() as work:
                 wgt = sideload.resign(args.file, args.sign, work) if args.sign else args.file
-                done = sideload.samsung_install(dev, wgt, keep_server=args.keep_server)
+                done = sideload.samsung_install(dev, wgt, keep_server=args.keep_server, sdb_address=args.sdb)
     except sideload.SideloadError as e:
         print(str(e), file=sys.stderr)
         return 1
@@ -318,6 +318,8 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--sign", metavar="PROFILE", help="samsung: sign the package again with this Tizen Studio profile first")
     s.add_argument("--package", help="androidtv: the app's package name, to check the installed file")
     s.add_argument("--keep-server", action="store_true", help="samsung: leave the sdb server running afterwards")
+    s.add_argument("--sdb", metavar="HOST:PORT", help="samsung: connect sdb here instead of to the set, for a set that "
+                   "refuses a direct connection (run `couchctl relay` first, then use 127.0.0.1:26102)")
     s.set_defaults(fn=cmd_sideload)
 
     s = sub.add_parser("watch", help="redirect the remotes' app buttons, until stopped")

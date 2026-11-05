@@ -150,22 +150,27 @@ def _sdb(sdb: str, env: Mapping[str, str] | None, *args: str, timeout: float = 3
 
 
 def samsung_install(dev: Device, wgt: str | os.PathLike, *, port: int = SDB_PORT, wait: float = INSTALL_WAIT,
-                    keep_server: bool = False, env: Mapping[str, str] | None = None) -> Installed:
+                    keep_server: bool = False, env: Mapping[str, str] | None = None,
+                    sdb_address: str | None = None) -> Installed:
     """Install (or update) a signed `.wgt` on a Samsung set and check that the set lists it with the
     package's version afterwards.
 
     The sdb server that `sdb connect` starts listens on every network interface, so it is stopped
-    when the install is over. Pass `keep_server` when something else on this machine uses it."""
+    when the install is over. Pass `keep_server` when something else on this machine uses it.
+    `sdb_address` (HOST:PORT) is where sdb connects instead of the set itself, for a set that refuses a
+    direct connection and accepts one through `couchctl relay`."""
     sdb = sdb_path(env)
     if not sdb:
         raise SideloadError("sdb was not found; set COUCHCTL_SDB to Tizen Studio's tools/sdb")
     app_id, version = wgt_info(wgt)
-    target = f"{dev.host}:{port}"
+    target = sdb_address or f"{dev.host}:{port}"
     try:
         _, said = _sdb(sdb, env, "connect", target)
         if f"connected to {target}" not in said or "failed" in said.lower():
             return Installed(False, None, f"sdb could not connect to {target} ({_tail(said)}). Developer mode must "
-                                          "be on with this machine as Host PC IP, applied by unplugging the set")
+                                          "be on with this machine as Host PC IP, applied by unplugging the set. A set that answers on "
+                                          "port 8001 and still refuses sdb may accept it through `couchctl relay` "
+                                          "(then pass its address with --sdb)")
         rc, said = _sdb(sdb, env, "-s", target, "push", str(wgt), REMOTE_WGT, timeout=300)
         if rc != 0:
             return Installed(False, None, f"could not copy the package to the set: {_tail(said)}")

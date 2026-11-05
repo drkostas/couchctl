@@ -111,6 +111,21 @@ couchctl relay --from 192.0.2.243 192.0.2.40:26101    # listens on 127.0.0.1:261
 sdb connect 127.0.0.1:26102
 ```
 
+### When the set refuses sdb from the right address
+
+Some firmware refuses a direct `sdb connect` with `failed to connect to remote target`, although
+developer mode is on, `couchctl info` shows this machine as `developerIP` and the set answers on
+port 8001. The same connection is accepted when it comes through a relay on the loopback. Give
+`--from` this machine's own address, leave the relay running, and tell `sideload` to use it:
+
+```bash
+couchctl relay --from 192.0.2.243 192.0.2.40:26101                          # in one terminal
+couchctl sideload tv app.wgt --sign my-profile --sdb 127.0.0.1:26102        # in another
+```
+
+Why the set accepts one and not the other is not known. A set takes about one sdb connection at a
+time, so do not open a second one while an install runs.
+
 ## Android TV
 
 Turn on network debugging in the device's developer options and allow the adb prompt on screen once. Apps are named by their package (`com.spotify.tv.android`), and `couchctl front` prints whatever package is in front. A device in standby usually stops answering adb, so couchctl reconnects by itself when it comes back.
