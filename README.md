@@ -115,11 +115,20 @@ sdb connect 127.0.0.1:26102
 
 Some firmware refuses a direct `sdb connect` with `failed to connect to remote target`, although
 developer mode is on, `couchctl info` shows this machine as `developerIP` and the set answers on
-port 8001. The same connection is accepted when it comes through a relay on the loopback. Give
-`--from` this machine's own address, leave the relay running, and tell `sideload` to use it:
+port 8001. The same connection is accepted when it comes through a relay on the loopback.
+`couchctl sideload` handles this by itself. When the direct connection fails but the set's sdb port
+answers, it starts a relay for that install, connects through it, and stops it at the end, and its
+answer says so. Nothing needs setting up:
 
 ```bash
-couchctl relay --from 192.0.2.243 192.0.2.40:26101                          # in one terminal
+couchctl sideload tv app.wgt --sign my-profile
+```
+
+To use a relay you already run (for example to make other sdb commands work too), start it and
+tell `sideload` where it is:
+
+```bash
+couchctl relay 192.0.2.40:26101                                             # in one terminal
 couchctl sideload tv app.wgt --sign my-profile --sdb 127.0.0.1:26102        # in another
 ```
 

@@ -344,9 +344,9 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--group", help="scene: the room or zone whose scene it is")
     s.set_defaults(fn=cmd_hue)
 
-    s = sub.add_parser("relay", help="relay sdb from 127.0.0.1 to a set, connecting from the address it trusts (needs no config)")
+    s = sub.add_parser("relay", help="relay sdb from 127.0.0.1 to a set, optionally connecting from the address it trusts (needs no config)")
     s.add_argument("target", help="the set's sdb address, HOST:PORT (port 26101)")
-    s.add_argument("--from", dest="source", required=True, help="the address the set trusts as its Host PC IP")
+    s.add_argument("--from", dest="source", help="the address the set trusts as its Host PC IP (default: this machine's usual address for the set)")
     s.add_argument("--listen", type=int, default=26102, help="the loopback port to listen on")
     s.set_defaults(fn=None)
 

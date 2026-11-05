@@ -18,6 +18,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -26,7 +27,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from . import androidtv
+from . import androidtv, relay
 from .config import Device
 
 #: the port a Samsung set opens for sdb once developer mode is active
@@ -149,6 +150,19 @@ def _sdb(sdb: str, env: Mapping[str, str] | None, *args: str, timeout: float = 3
     return r.returncode, (r.stdout or "") + (r.stderr or "")
 
 
+def _answers(host: str, port: int, timeout: float = 3.0) -> bool:
+    """Whether something accepts a connection on host:port."""
+    try:
+        socket.create_connection((host, port), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
+
+
+def _connected(said: str, target: str) -> bool:
+    return f"connected to {target}" in said and "failed" not in said.lower()
+
+
 def samsung_install(dev: Device, wgt: str | os.PathLike, *, port: int = SDB_PORT, wait: float = INSTALL_WAIT,
                     keep_server: bool = False, env: Mapping[str, str] | None = None,
                     sdb_address: str | None = None) -> Installed:
@@ -157,20 +171,32 @@ def samsung_install(dev: Device, wgt: str | os.PathLike, *, port: int = SDB_PORT
 
     The sdb server that `sdb connect` starts listens on every network interface, so it is stopped
     when the install is over. Pass `keep_server` when something else on this machine uses it.
-    `sdb_address` (HOST:PORT) is where sdb connects instead of the set itself, for a set that refuses a
-    direct connection and accepts one through `couchctl relay`."""
+
+    Some firmware refuses a direct `sdb connect` and accepts the same connection through a relay on
+    the loopback. When the direct connection fails but the set's sdb port answers, a relay is started
+    for this install and stopped at the end. `sdb_address` (HOST:PORT) is where sdb connects instead
+    of the set, for a relay that is already running (`couchctl relay`)."""
     sdb = sdb_path(env)
     if not sdb:
         raise SideloadError("sdb was not found; set COUCHCTL_SDB to Tizen Studio's tools/sdb")
     app_id, version = wgt_info(wgt)
     target = sdb_address or f"{dev.host}:{port}"
+    running = None
+    via = ""
     try:
         _, said = _sdb(sdb, env, "connect", target)
-        if f"connected to {target}" not in said or "failed" in said.lower():
+        if not _connected(said, target) and sdb_address is None and _answers(dev.host, port):
+            running = relay.start(dev.host, port)
+            _sdb(sdb, env, "disconnect", target)
+            target = running.address
+            _, said = _sdb(sdb, env, "connect", target)
+            via = " (through a relay, because the set refused a direct sdb connection)"
+        if not _connected(said, target):
             return Installed(False, None, f"sdb could not connect to {target} ({_tail(said)}). Developer mode must "
-                                          "be on with this machine as Host PC IP, applied by unplugging the set. A set that answers on "
-                                          "port 8001 and still refuses sdb may accept it through `couchctl relay` "
-                                          "(then pass its address with --sdb)")
+                                          "be on with this machine as Host PC IP, applied by unplugging the set"
+                                          + (". A relay was tried and the set refused that too" if running else
+                                             ". A set that answers on its sdb port and still refuses sdb may accept it "
+                                             "through `couchctl relay` (then pass its address with --sdb)"))
         rc, said = _sdb(sdb, env, "-s", target, "push", str(wgt), REMOTE_WGT, timeout=300)
         if rc != 0:
             return Installed(False, None, f"could not copy the package to the set: {_tail(said)}")
@@ -181,11 +207,13 @@ def samsung_install(dev: Device, wgt: str | os.PathLike, *, port: int = SDB_PORT
         waited = f" (the install had not finished after {wait:.0f} s)" if rc is None else ""
         return Installed(ok, have or None,
                          f"{app_id} is {'at ' + have if have else 'not listed'} after installing {version or 'it'}"
-                         f"{waited}; the set said: {_tail(said)}")
+                         f"{waited}{via}; the set said: {_tail(said)}")
     finally:
         _sdb(sdb, env, "disconnect", target)
         if not keep_server:
             _sdb(sdb, env, "kill-server")
+        if running:
+            running.stop()
 
 
 def samsung_version(dev: Device, app_id: str, timeout: float = 4.0) -> str | None:
