@@ -4,7 +4,7 @@ import stat
 import pytest
 
 from couchctl import power, redirect, samsung, tokens
-from couchctl.config import Redirect
+from couchctl.config import Device, Redirect
 
 from fake_samsung import FakeTV
 
@@ -196,6 +196,29 @@ def test_foreground_and_launch(tv):
     ok, _ = samsung.launch(dev, "app.unwanted")
     assert ok
     assert redirect.peek(dev) == (True, "app.unwanted")
+
+
+def _closed_port():
+    import socket
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def test_a_set_that_does_not_answer_is_asked_once_and_not_app_by_app(monkeypatch):
+    dev = Device(name="off", kind="samsung", host="127.0.0.1", api_port=_closed_port())
+    asked = []
+    monkeypatch.setattr(samsung, "app_state", lambda d, app_id, timeout=4.0: asked.append(app_id) or (None, None))
+    assert samsung.foreground(dev, ["a", "b", "c"]) == (False, None)
+    assert asked == []
+
+
+def test_foreground_can_skip_the_reach_check(monkeypatch):
+    dev = Device(name="off", kind="samsung", host="127.0.0.1", api_port=_closed_port())
+    asked = []
+    monkeypatch.setattr(samsung, "app_state", lambda d, app_id, timeout=4.0: asked.append(app_id) or (None, None))
+    assert samsung.foreground(dev, ["a", "b", "c"], reach_timeout=None) == (False, None)
+    assert asked == ["a", "b", "c"]
 
 
 def test_watch_redirects_a_real_press(tv):

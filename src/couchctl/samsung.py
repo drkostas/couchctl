@@ -50,12 +50,23 @@ def app_state(dev: Device, app_id: str, timeout: float = 4.0) -> tuple[bool | No
         return None, None
 
 
-def foreground(dev: Device, among: list[str]) -> tuple[bool, str | None]:
+#: how long `foreground` waits for the set to answer at all before it asks about apps
+REACH_TIMEOUT = 2.0
+
+
+def foreground(dev: Device, among: list[str], reach_timeout: float | None = REACH_TIMEOUT) -> tuple[bool, str | None]:
     """(could the set be reached, which of `among` is on screen).
 
     None for the app means none of `among` is visible, not that nothing is. The home screen and
     any app outside the list read the same way.
+
+    A set that is off or asleep answers nothing, and each app question waits up to four seconds,
+    so asking three apps took twelve seconds on every poll of a set nobody is watching. One
+    connection to the set's API port first says in `reach_timeout` seconds that nobody is there.
+    Pass `reach_timeout=None` to ask the apps without that check.
     """
+    if reach_timeout is not None and not reachable(dev.host, dev.api_port, reach_timeout):
+        return False, None
     reached = False
     for app_id in among:
         running, visible = app_state(dev, app_id)
