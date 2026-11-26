@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
 
 - `samsung.pair(dev, token_file, again=True)` forgets the held token first, as `couchctl pair --again` does, so the set is asked and the prompt appears. Without it a held token answers "already paired" without asking the set, so a token the set has stopped accepting could never be replaced by a program calling `pair`. `couchctl pair --again` now goes through it.
 - `samsung.send_key`, `send_keys` and `send_text` return a `Sent`, a `(ok, why)` pair as before with a `.token` that says what the set did with the token it held: `"accepted"` when the remote channel opened with it, `"refused"` when the set no longer accepts it (it answered `ms.channel.unauthorized`, or asked on its own screen whether to allow the remote and was not answered), and `None` when the command never reached that question. A set whose token is refused is otherwise found only by reading the sentence, and a television that is switched off most of the time can hold a refused token for weeks without anything noticing.
