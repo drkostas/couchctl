@@ -1,3 +1,3 @@
 """Control Samsung and Android TVs on your network, and redirect their remotes' app buttons."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
