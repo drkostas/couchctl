@@ -61,10 +61,8 @@ def cmd_pair(cfg, args) -> int:
     if dev.kind != "samsung":
         print(f"{dev.name} is an androidtv device; allow the adb prompt on its screen instead", file=sys.stderr)
         return 2
-    if args.again:
-        token_store.forget(cfg.token_file, dev.name)
     print(f"Connecting to {dev.name}. Choose Allow on the television when it asks.", flush=True)
-    outcome, why = samsung.pair(dev, cfg.token_file)
+    outcome, why = samsung.pair(dev, cfg.token_file, again=args.again)
     print(f"{outcome}: {why}")
     return 0 if outcome == "success" else 1
 
