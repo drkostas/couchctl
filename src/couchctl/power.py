@@ -85,7 +85,13 @@ def wake(dev: Device, *, wait: float = WAKE_WAIT, every: float = WAKE_EVERY,
 
     The wake packet is sent every `every` seconds until the device is on or `wait` seconds pass.
     The outcome is "success" only when the device is on (a Samsung set that answers in standby is
-    not), "failure" when it never came on, and "refused" when the device has no MAC address to wake.
+    not), "unknown" when `wait` ran out with no answer, "failure" when the packet could not be sent,
+    and "refused" when the device has no MAC address to wake.
+
+    Silence at the end of the wait is "unknown" and not "failure", because it measures nothing about
+    the device. A television that is starting can take longer than the wait to answer, and one that
+    does not listen for the packet never answers, and from outside the two look the same. A caller
+    that needs to know asks the device's state again later.
     """
     if not dev.mac:
         return "refused", f"{dev.name} has no mac in the config, so it cannot be woken over the network"
@@ -102,9 +108,11 @@ def wake(dev: Device, *, wait: float = WAKE_WAIT, every: float = WAKE_EVERY,
         if check():
             return "success", f"{dev.name} is on, after {clock() - started:.0f} s"
         if clock() - started >= wait:
-            return "failure", (f"{dev.name} did not come on after {sent} wake packets over {wait:.0f} s. "
-                               "A set wakes from the network only when it listens for it (Power on with mobile "
-                               "on Samsung sets), and one switched off moments ago may still be shutting down.")
+            return "unknown", (f"{dev.name} has not answered after {sent} wake packets over {wait:.0f} s, so it is not known "
+                               "whether it will come on. A television that is starting can take longer than this wait to "
+                               "answer, so ask its state again before treating this as a failure. A set wakes from the "
+                               "network only when it listens for it (Power on with mobile on Samsung sets), and one "
+                               "switched off moments ago may still be shutting down.")
 
 
 def power_on(dev: Device, *, wait: float = WAKE_WAIT, env: Mapping[str, str] | None = None) -> tuple[str, str]:
