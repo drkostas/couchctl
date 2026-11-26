@@ -154,7 +154,24 @@ def pair(dev: Device, token_file, timeout: float = PROMPT_SECONDS + 10) -> tuple
     return "success", "paired"
 
 
-def _send(dev: Device, token_file, payloads: list[dict], done: str, pace: float = 0.2) -> tuple[bool, str]:
+class Sent(tuple):
+    """What a remote command answered: `(ok, why)`, so `ok, why = send_key(...)` works as it always did, and `.token`.
+
+    `.token` says what the set did with the token that was held, when the exchange reached that question.
+    "accepted" means the set opened the remote channel with it. "refused" means the set answered that it no longer
+    accepts it, either at once (`ms.channel.unauthorized`) or by asking on its own screen for somebody to allow
+    the remote and getting no answer (`ms.channel.timeOut`). None means the exchange never reached the question
+    (the set was not answering, no token was held, or something else went wrong), so nothing is known about the token.
+    A caller that keeps a record of its television can write "refused" down without parsing a sentence.
+    """
+
+    def __new__(cls, ok: bool, why: str, token: str | None = None) -> "Sent":
+        self = super().__new__(cls, (ok, why))
+        self.token = token
+        return self
+
+
+def _send(dev: Device, token_file, payloads: list[dict], done: str, pace: float = 0.2) -> Sent:
     """Open the remote channel with the held token and send each message on it, `pace` apart.
 
     The token and greeting handling every remote command needs lives here once: the set must be
@@ -163,26 +180,28 @@ def _send(dev: Device, token_file, payloads: list[dict], done: str, pace: float 
     """
     said = info(dev)
     if not said:
-        return False, "the set is not answering, so there is nothing to talk to"
+        return Sent(False, "the set is not answering, so there is nothing to talk to")
     token = token_store.read(token_file, dev.name)
     if said.get("TokenAuthSupport") == "true" and not token:
-        return False, f"not paired: run `couchctl pair {dev.name}` once and allow the prompt on the television"
+        return Sent(False, f"not paired: run `couchctl pair {dev.name}` once and allow the prompt on the television")
     try:
         greeting, fresh = asyncio.run(_talk(dev, token, payloads, pace=pace))
     except Exception as e:  # noqa: BLE001
-        return False, f"{type(e).__name__}: {str(e)[:140]}"
+        return Sent(False, f"{type(e).__name__}: {str(e)[:140]}")
+    # a token that was held and then refused is a different fact from a set that never got as far as the question
+    refused = "refused" if token else None
     if greeting.get("event") == "ms.channel.unauthorized":
-        return False, f"the television refused the token: run `couchctl pair {dev.name} --again`"
+        return Sent(False, f"the television refused the token: run `couchctl pair {dev.name} --again`", refused)
     if greeting.get("event") == "ms.channel.timeOut":
-        return False, _unanswered(dev)
+        return Sent(False, _unanswered(dev), refused)
     if greeting.get("event") != "ms.channel.connect":
-        return False, f"the television did not open the remote channel ({greeting.get('event')!r})"
+        return Sent(False, f"the television did not open the remote channel ({greeting.get('event')!r})")
     if fresh and fresh != token:
         token_store.write(token_file, dev.name, fresh)
-    return True, done
+    return Sent(True, done, "accepted" if token else None)
 
 
-def send_key(dev: Device, token_file, key: str) -> tuple[bool, str]:
+def send_key(dev: Device, token_file, key: str) -> Sent:
     """Press one remote key (KEY_POWER, KEY_HOME, KEY_VOLUP and so on)."""
     payload = {
         "method": "ms.remote.control",
@@ -195,7 +214,7 @@ _REMOTE_MOVE = {"left": "KEY_LEFT", "right": "KEY_RIGHT", "up": "KEY_UP",
                 "down": "KEY_DOWN", "ok": "KEY_ENTER"}
 
 
-def send_keys(dev: Device, token_file, moves, *, pace: float = 0.35) -> tuple[bool, str]:
+def send_keys(dev: Device, token_file, moves, *, pace: float = 0.35) -> Sent:
     """Press a run of remote keys on one connection, `pace` seconds apart.
 
     `moves` are the abstract names `keyboard.plan` emits ("left", "right", "up", "down", "ok"),
@@ -226,7 +245,7 @@ def type_on_keyboard(dev: Device, token_file, text: str, keymap, *, submit: bool
     return ok, msg
 
 
-def send_text(dev: Device, token_file, text: str, *, submit: bool = False) -> tuple[bool, str]:
+def send_text(dev: Device, token_file, text: str, *, submit: bool = False) -> Sent:
     """Type `text` into whatever text field the set has open, over the remote channel.
 
     The characters go as one `SendInputString` message (the text base64-encoded in `Cmd`), and

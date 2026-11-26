@@ -106,6 +106,45 @@ def test_a_prompt_nobody_answers_is_named_and_no_key_is_sent(token_file, monkeyp
         t.close()
 
 
+def test_a_remote_command_says_what_the_set_did_with_the_token(tv, token_file, monkeypatch):
+    """`.token` is "accepted" when the channel opened with the held token, "refused" when the set no longer accepts it
+    (at once, or by asking on its own screen and getting no answer), and None when the exchange never reached the
+    question. The answer still unpacks as (ok, why), as it always did."""
+    samsung.pair(tv.device(), token_file)
+    got = samsung.send_key(tv.device(), token_file, "KEY_HOME")
+    ok, why = got
+    assert ok and why == "KEY_HOME sent" and got.token == "accepted"
+    assert samsung.send_keys(tv.device(), token_file, ["up"]).token == "accepted"
+    assert samsung.send_text(tv.device(), token_file, "hi").token == "accepted"
+
+    rejected = FakeTV(allow=False)
+    try:
+        tokens.write(token_file, "tv", "a-token-the-set-forgot")
+        got = samsung.send_key(rejected.device(), token_file, "KEY_POWER")
+        assert not got[0] and got.token == "refused" and "refused the token" in got[1]
+        assert rejected.keys == []
+    finally:
+        rejected.close()
+
+    monkeypatch.setattr(samsung, "PROMPT_SECONDS", 0.5)
+    asking = FakeTV(unanswered_after=0.5)
+    try:
+        tokens.write(token_file, "tv", "a-token-the-set-forgot")
+        got = samsung.send_key(asking.device(), token_file, "KEY_POWER")
+        assert not got[0] and got.token == "refused" and "nobody answered" in got[1]
+    finally:
+        asking.close()
+
+
+def test_a_command_that_never_reached_the_token_question_says_nothing_about_the_token(tv, token_file):
+    fresh = samsung.send_key(tv.device(), token_file, "KEY_HOME")          # token auth, and nothing is held yet
+    assert not fresh[0] and "not paired" in fresh[1] and fresh.token is None
+    away = Device(name="tv", kind="samsung", host="127.0.0.1", api_port=9)   # nothing listens there
+    tokens.write(token_file, "tv", "whatever")
+    silent = samsung.send_key(away, token_file, "KEY_HOME")
+    assert not silent[0] and "not answering" in silent[1] and silent.token is None
+
+
 def test_pairing_that_nobody_answers_says_so(token_file, monkeypatch):
     monkeypatch.setattr(samsung, "PROMPT_SECONDS", 0.5)
     t = FakeTV(unanswered_after=0.5)
