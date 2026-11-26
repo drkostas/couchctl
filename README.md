@@ -84,6 +84,8 @@ The set answers HTTP on port 8001 without a password. That is enough to read its
 
 `couchctl on` sends a wake-on-LAN packet to the `mac` in the config every 2 seconds until the set answers, for up to 25 seconds, and says `success` when it came on. When the 25 seconds run out with no answer it says `unknown` and not `failure`, because silence does not tell a set that is still starting (a television can take longer than that to answer) from one that never listens for the packet. Ask `couchctl state` again later. The set only answers it when "Power on with mobile" is enabled (Settings, General, Network, Expert settings on most models).
 
+A remote command (`samsung.send_key`, `send_keys`, `send_text`) answers `(ok, why)` as before, and the answer also has a `.token` that says what the set did with the token it held. `"accepted"` means the set opened the remote channel with it. `"refused"` means the set no longer accepts it, either at once or by asking on its own screen whether to allow the remote and getting no answer. `None` means the command never reached that question (the set was not answering, no token was held, or something else went wrong), so nothing is known about the token. A program that keeps a record of its television can note a refused token from this and does not have to read the sentence.
+
 A Samsung app id is the long number in the Samsung app store (3201606009684 is Spotify), or for a sideloaded app the id its package declares. To find the id behind a button, press the button and run `couchctl front <device> <id> <id> ...` with the ids you suspect, or read the list from the set with `sdb shell 0 vd_applist` if you have Tizen Studio.
 
 ## Typing into an app that has its own keyboard
