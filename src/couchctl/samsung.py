@@ -132,11 +132,17 @@ async def _talk(dev: Device, token: str | None, payloads: list[dict] | None = No
         return greeting, fresh
 
 
-def pair(dev: Device, token_file, timeout: float = PROMPT_SECONDS + 10) -> tuple[str, str]:
+def pair(dev: Device, token_file, timeout: float = PROMPT_SECONDS + 10, *, again: bool = False) -> tuple[str, str]:
     """Ask the set for a token. It shows a prompt, and somebody in the room has to allow it.
 
     Returns (outcome, message), where outcome is "success", "refused" or "failure".
+
+    A held token answers "already paired" without asking the set, whether or not the set still accepts it. A token the
+    set has stopped accepting therefore can never be replaced by calling this alone. With `again`, the held token is
+    forgotten first (what `couchctl pair --again` does), so the set is asked and the prompt appears.
     """
+    if again:
+        token_store.forget(token_file, dev.name)
     if token_store.read(token_file, dev.name):
         return "success", "already paired"
     try:

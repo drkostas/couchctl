@@ -32,6 +32,26 @@ def test_pairing_keeps_the_token_in_a_private_file(tv, token_file):
     assert stat.S_IMODE(os.stat(token_file).st_mode) == 0o600
 
 
+def test_pair_again_replaces_a_token_the_set_no_longer_accepts(tv, token_file):
+    """A held token answers "already paired" without asking the set, so a token the set has stopped accepting could never
+    be replaced. `again` forgets it first, as `couchctl pair --again` does, and the set is asked."""
+    tokens.write(token_file, "tv", "a-token-the-set-forgot")
+    assert samsung.pair(tv.device(), token_file) == ("success", "already paired")
+    assert tokens.read(token_file, "tv") == "a-token-the-set-forgot"
+    assert samsung.pair(tv.device(), token_file, again=True) == ("success", "paired")
+    assert tokens.read(token_file, "tv") == "tok-123456"
+
+
+def test_pair_again_leaves_nothing_held_when_the_prompt_is_declined(token_file):
+    declined = FakeTV(allow=False)
+    try:
+        tokens.write(token_file, "tv", "a-token-the-set-forgot")
+        outcome, _ = samsung.pair(declined.device(), token_file, again=True)
+        assert outcome == "refused" and tokens.read(token_file, "tv") is None
+    finally:
+        declined.close()
+
+
 def test_a_declined_prompt_is_refused(token_file):
     t = FakeTV(allow=False)
     try:
